@@ -195,6 +195,7 @@ def draw_rendering_net(setup,device,input_params,position,rotate_theta,variable_
     #load constants
     light_normals = setup.get_light_normal_torch()#[lightnum,3]
     light_poses = setup.get_light_poses_torch()#[lightnum,3],
+    light_num = light_poses.size()[0]
     cam_pos = setup.get_cam_pos_torch()#[3]
     if use_new_cam_pos:
         cam_pos = new_cam_pos
@@ -207,7 +208,7 @@ def draw_rendering_net(setup,device,input_params,position,rotate_theta,variable_
 
     test_node = torch.cat([view_mat_model,view_mat_model_t,view_mat_for_normal,view_mat_for_normal_t],dim=0)
 
-    ###[STEP 1]
+    ###[STEP 1] define frame
     view_dir = cam_pos - position #shape=[batch,3]
     view_dir = torch.nn.functional.normalize(view_dir,dim=1)#shape=[batch,3]
 
@@ -242,95 +243,67 @@ def draw_rendering_net(setup,device,input_params,position,rotate_theta,variable_
 
     if rotate_frame:
         #rotate frame
-        tmp_ones = torch.ones(batch_size,1,dtype=torch.float32,device=device)
-        pn = torch.unsqueeze(torch.cat([n,tmp_ones],dim=1),1)#[batch,1,4]
-        pt = torch.unsqueeze(torch.cat([t,tmp_ones],dim=1),1)#[batch,1,4]
-        pb = torch.unsqueeze(torch.cat([b,tmp_ones],dim=1),1)#[batch,1,4]
+        static_tmp_ones = torch.ones(batch_size,1,dtype=torch.float32,device=device)
+        pn = torch.unsqueeze(torch.cat([n,static_tmp_ones],dim=1),1)#[batch,1,4]
+        pt = torch.unsqueeze(torch.cat([t,static_tmp_ones],dim=1),1)#[batch,1,4]
+        pb = torch.unsqueeze(torch.cat([b,static_tmp_ones],dim=1),1)#[batch,1,4]
 
         n = torch.squeeze(torch.matmul(pn,view_mat_for_normal_t),1)[:,:3]#[batch,1,4]
         t = torch.squeeze(torch.matmul(pt,view_mat_for_normal_t),1)[:,:3]
         b = torch.squeeze(torch.matmul(pb,view_mat_for_normal_t),1)[:,:3]
+    
+    if rotate_point:
+        position = torch.unsqueeze(torch.cat([position,static_tmp_ones],dim=1),dim=1)#[batch,1,4]
+        position = torch.squeeze(torch.matmul(position,view_mat_model_t),dim=1)[:,:3]#shape=[batch,3]
         
-    return None,torch.cat([n,t,b],dim=1)
-    # self.endPoints[variable_scope_name+"n"] = n
-    # self.endPoints[variable_scope_name+"t"] = t
-    # self.endPoints[variable_scope_name+"b"] = b
-    # n = tf.tile(tf.constant([0,0,1],dtype=tf.float32,shape=[1,3]),[self.fitting_batch_size,1])#self.normalized(n)
-    # t = tf.tile(tf.constant([0,1,0],dtype=tf.float32,shape=[1,3]),[self.fitting_batch_size,1])#self.normalized(t)
-    # ax = tf.clip_by_value(ax,0.006,0.503)
-    # ay = tf.clip_by_value(ay,0.006,0.503)
-    # pd = tf.clip_by_value(pd,0,1)
-    # ps = tf.clip_by_value(ps,0,10)
-
-    #regularizer of params
-    # regular_loss_n = self.regularizer_relu(n_2d,1e-3,1.0)+self.regularizer_relu(theta,0.0,math.pi)+self.regularizer_relu(ax,0.006,0.503)+self.regularizer_relu(ay,0.006,0.503)+self.regularizer_relu(pd,1e-3,1)+self.regularizer_relu(ps,1e-3,10)
-    # self.endPoints["regular_loss"] = regular_loss_n
-
-
-    self.endPoints[variable_scope_name+"render_params"] = tf.concat([n,t,b,ax,ay,pd,ps],axis=-1)
     ###[STEP 2]
     ##define rendering
-    with tf.variable_scope("rendering"):
-        self.endPoints[variable_scope_name+"position_origin"] = position
-        if rotate_point:
-            position = tf.expand_dims(tf.concat([position,tf.ones([position.shape[0],1],tf.float32)],axis=1),axis=1)
-            position = tf.squeeze(tf.matmul(position,view_mat_model_t),axis=1)#position@view_mat_model_t
-            position,_ = tf.split(position,[3,1],axis=1)#shape=[batch,3]
-        self.endPoints[variable_scope_name+"position_rotated"] = position
 
-        #get real view dir
-        view_dir = cam_pos - position #shape=[batch,3]
-        view_dir = self.normalized(view_dir)#shape=[batch,3]
-        self.endPoints[variable_scope_name+"view_dir_rotated"] = view_dir
+    #get real view dir
+    view_dir = torch.unsqueeze(cam_pos,dim=0) - position #shape=[batch,3]
+    view_dir = torch.nn.functional.normalize(view_dir,dim=1)#shape=[batch,3]
+
+    # light_poses_broaded = tf.tile(tf.expand_dims(light_poses,axis=0),[self.fitting_batch_size,1,1],name="expand_light_poses")#shape is [batch,lightnum,3]
+    # light_normals_broaded = tf.tile(tf.expand_dims(light_normals,axis=0),[self.fitting_batch_size,1,1],name="expand_light_normals")#shape is [batch,lightnum,3]
+    wi = torch.unsqueeze(light_poses,dim=0)-torch.unsqueeze(position,dim=1)#[batch,lightnum,3]
+    wi = torch.nn.functional.normalize(wi,dim=2)#shape is [batch,lightnum,3]
 
 
+    wi_local = torch.cat([  torch.sum(wi*torch.unsqueeze(t,dim=1),dim=2,keepdim=True),
+                            torch.sum(wi*torch.unsqueeze(b,dim=1),dim=2,keepdim=True),
+                            torch.sum(wi*torch.unsqueeze(n,dim=1),dim=2,keepdim=True)],dim=2)#shape is [batch,lightnum,3]
+    
+    wo_local = torch.cat([  torch.sum(view_dir*t,dim=1,keepdim=True),
+                            torch.sum(view_dir*b,dim=1,keepdim=True),
+                            torch.sum(view_dir*n,dim=1,keepdim=True)],dim=1)#shape is [batch,3]
+    
+    
+    form_factors = compute_form_factors(position,n,light_poses_broaded,light_normals_broaded,variable_scope_name,with_cos)#[batch,lightnum,1]
+    return None,wo_local
+    
+    
+    
+    lumi = self.calc_light_brdf(wi_local,wo_local,ax,ay,pd,ps,pd_ps_wanted,specular_component)#[batch,lightnum,channel]
+    self.endPoints[variable_scope_name+"lumi_without_formfactor"] = lumi
+    
+    lumi = lumi*form_factors*1e4*math.pi*1e-2#[batch,lightnum,channel]
 
-        light_poses_broaded = tf.tile(tf.expand_dims(light_poses,axis=0),[self.fitting_batch_size,1,1],name="expand_light_poses")#shape is [batch,lightnum,3]
-        light_normals_broaded = tf.tile(tf.expand_dims(light_normals,axis=0),[self.fitting_batch_size,1,1],name="expand_light_normals")#shape is [batch,lightnum,3]
-        position_broded = tf.tile(tf.expand_dims(position,axis=1),[1,self.lumitexel_size,1],name="expand_position")
-        wi = light_poses_broaded-position_broded
-        wi = self.normalized_nd(wi)#shape is [batch,lightnum,3]
-        self.endPoints[variable_scope_name+"wi"] = wi
+    wi_dot_n = self.dot_ndm_vector(wi,tf.expand_dims(n,axis=1))#[batch,lightnum,1]
+    lumi = lumi*((tf.sign(wi_dot_n)+1.0)*0.5)
+    # judgements = tf.less(wi_dot_n,1e-5)
+    # lumi = tf.where(judgements,tf.zeros([self.fitting_batch_size,self.lumitexel_size,1]),lumi)
 
+    n_dot_views = self.dot_ndm_vector(view_dir,n)#[batch,1]
+    n_dot_view_dir = tf.tile(tf.expand_dims(n_dot_views,axis=1),[1,self.lumitexel_size,1])#[batch,lightnum,1]
+    
+    self.endPoints[variable_scope_name+"n_dot_view_dir"] = n_dot_views
 
-        wi_local = tf.concat([self.dot_ndm_vector(wi,tf.expand_dims(t,axis=1)),
-                                self.dot_ndm_vector(wi,tf.expand_dims(b,axis=1)),
-                                self.dot_ndm_vector(wi,tf.expand_dims(n,axis=1))],axis=-1)#shape is [batch,lightnum,3]
-        
-        # view_dir_broaded = tf.tile(tf.expand_dims(view_dir,axis=1),[1,self.lumitexel_size,1])#shape is [batch,lightnum,3]
-        wo_local = tf.concat([self.dot_ndm_vector(view_dir,t),
-                                self.dot_ndm_vector(view_dir,b),
-                                self.dot_ndm_vector(view_dir,n)],axis=-1)#shape is [batch,3]
-        wo_local = tf.tile(tf.expand_dims(wo_local,axis=1),[1,self.lumitexel_size,1])#shape is [batch,lightnum,3]
-
-        self.endPoints[variable_scope_name+"wi_local"] = wi_local
-        self.endPoints[variable_scope_name+"wo_local"] = wo_local
-        
-        self.endPoints[variable_scope_name+"light_poses_broaded"] = light_poses_broaded
-        self.endPoints[variable_scope_name+"light_normals_broaded"] = light_normals_broaded
-        form_factors = self.compute_form_factors(position,n,light_poses_broaded,light_normals_broaded,variable_scope_name,with_cos)#[batch,lightnum,1]
-        self.endPoints[variable_scope_name+"form_factors"] = form_factors
-        lumi = self.calc_light_brdf(wi_local,wo_local,ax,ay,pd,ps,pd_ps_wanted,specular_component)#[batch,lightnum,channel]
-        self.endPoints[variable_scope_name+"lumi_without_formfactor"] = lumi
-        
-        lumi = lumi*form_factors*1e4*math.pi*1e-2#[batch,lightnum,channel]
-
-        wi_dot_n = self.dot_ndm_vector(wi,tf.expand_dims(n,axis=1))#[batch,lightnum,1]
-        lumi = lumi*((tf.sign(wi_dot_n)+1.0)*0.5)
-        # judgements = tf.less(wi_dot_n,1e-5)
-        # lumi = tf.where(judgements,tf.zeros([self.fitting_batch_size,self.lumitexel_size,1]),lumi)
-
-        n_dot_views = self.dot_ndm_vector(view_dir,n)#[batch,1]
-        n_dot_view_dir = tf.tile(tf.expand_dims(n_dot_views,axis=1),[1,self.lumitexel_size,1])#[batch,lightnum,1]
-        
-        self.endPoints[variable_scope_name+"n_dot_view_dir"] = n_dot_views
-
-        judgements = tf.less(n_dot_view_dir,0.0)
-        if self.if_grey_scale:
-            rendered_results = tf.where(judgements,tf.zeros([self.fitting_batch_size,self.lumitexel_size,1]),lumi)#[batch,lightnum]
-        else:
-            rendered_results = tf.where(tf.tile(judgements,[1,1,3]),tf.zeros([self.fitting_batch_size,self.lumitexel_size,3]),lumi)#[batch,lightnum]
-        self.endPoints[variable_scope_name+"rendered_results"] = rendered_results
+    judgements = tf.less(n_dot_view_dir,0.0)
+    if self.if_grey_scale:
+        rendered_results = tf.where(judgements,tf.zeros([self.fitting_batch_size,self.lumitexel_size,1]),lumi)#[batch,lightnum]
+    else:
+        rendered_results = tf.where(tf.tile(judgements,[1,1,3]),tf.zeros([self.fitting_batch_size,self.lumitexel_size,3]),lumi)#[batch,lightnum]
+    self.endPoints[variable_scope_name+"rendered_results"] = rendered_results
 
     return rendered_results
 
