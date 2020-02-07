@@ -92,7 +92,7 @@ def back_full_octa_map(a):
 
     return torch.nn.functional.normalize(result,dim=1)
 
-def build_frame_f_z(n,theta,device,with_theta=True):
+def build_frame_f_z(n,theta,with_theta=True):
     '''
     n = [batch,3]
     return =t[batch,3] b[batch,3]
@@ -110,9 +110,9 @@ def build_frame_f_z(n,theta,device,with_theta=True):
     #     constant_001 = build_frame_f_z.constant_001
     #     constant_100 = build_frame_f_z.constant_100
     
-    constant_001 = torch.zeros(batch_size,3,device=device,dtype=torch.float32)
+    constant_001 = torch.zeros_like(n)
     constant_001[:,2] = 1.0
-    constant_100 = torch.zeros(batch_size,3,device=device,dtype=torch.float32)
+    constant_100 = torch.zeros_like(n)
     constant_100[:,0] = 1.0
 
     nz_notequal_1 = torch.gt(torch.abs(nz-1.0),1e-6)
@@ -308,12 +308,11 @@ def calc_light_brdf(wi_local,wo_local,ax,ay,pd,ps,pd_ps_wanted,specular_componen
         return b*ps
     # return b*ps# return a+b*ps
 
-def draw_rendering_net(setup,device,input_params,position,rotate_theta,variable_scope_name,
+def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_name,
     with_cos = True,pd_ps_wanted="both",rotate_point = True,specular_component="D_F_G_B",
     global_custom_frame=None,use_custom_frame="",rotate_frame=True,new_cam_pos=None,use_new_cam_pos=False):
     '''
     setup is Setup_Config class
-    deivce is the rendering device
     input_params = (rendering parameters) shape = [self.fitting_batch_size,self.parameter_len] i.e.[24576,10]
     position = (rendering positions) shape=[self.fitting_batch_size,3]
     variable_scope_name = (for variable check a string like"rendering1") 
@@ -365,21 +364,21 @@ def draw_rendering_net(setup,device,input_params,position,rotate_theta,variable_
             t = global_custom_frame[1]
             b = global_custom_frame[2]
         else:
-            t,b = build_frame_f_z(n,None,device,with_theta=False)
+            t,b = build_frame_f_z(n,None,with_theta=False)
     else:
          #build local frame
-        frame_t,frame_b = build_frame_f_z(view_dir,None,device,with_theta=False)#[batch,3]
+        frame_t,frame_b = build_frame_f_z(view_dir,None,with_theta=False)#[batch,3]
         frame_n = view_dir#[batch,3]
 
         n_local = back_hemi_octa_map(n_2d)#[batch,3]
-        t_local,_ = build_frame_f_z(n_local,theta,device,with_theta=True)
+        t_local,_ = build_frame_f_z(n_local,theta,with_theta=True)
         n = n_local[:,[0]]*frame_t+n_local[:,[1]]*frame_b+n_local[:,[2]]*frame_n#[batch,3]
         t = t_local[:,[0]]*frame_t+t_local[:,[1]]*frame_b+t_local[:,[2]]*frame_n#[batch,3]
         b = torch.cross(n,t)#[batch,3]
 
     if rotate_frame:
         #rotate frame
-        static_tmp_ones = torch.ones(batch_size,1,dtype=torch.float32,device=device)
+        static_tmp_ones = torch.ones(batch_size,1,dtype=torch.float32,device=n.device)
         pn = torch.unsqueeze(torch.cat([n,static_tmp_ones],dim=1),1)#[batch,1,4]
         pt = torch.unsqueeze(torch.cat([t,static_tmp_ones],dim=1),1)#[batch,1,4]
         pb = torch.unsqueeze(torch.cat([b,static_tmp_ones],dim=1),1)#[batch,1,4]
