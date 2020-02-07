@@ -23,7 +23,6 @@ if __name__ == "__main__":
         batch_size = 5
 
         standard_rendering_parameters = {}
-        standard_rendering_parameters["if_grey_scale"] = True
         standard_rendering_parameters["config_dir"] = "wallet_of_torch_renderer/blackbox20_render_configs_1x1/"
         standard_rendering_parameters["device"] = device
 
