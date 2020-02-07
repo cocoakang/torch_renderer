@@ -172,6 +172,35 @@ def rotation_axis(t,v,isRightHand=True):
     res = res.view(-1,4,4)
     return res
 
+def compute_form_factors(position,n,light_poses,light_normals,end_points,with_cos=True):
+    '''
+    position = [batch,3]
+    n = [batch,3]
+    light_poses = [lightnum,3]
+    light_normals = [lightnum,3]
+
+    with_cos: if this is true, form factor adds cos(ldir.light_normals)  
+
+    return shape=[batch,lightnum,1]
+    '''
+    ldir = torch.unsqueeze(light_poses,dim=0)-torch.unsqueeze(position,dim=1)#[batch,lightnum,3]
+    dist = torch.sqrt(torch.sum(ldir**2,dim=2,keepdim=True))#[batch,lightnum,1]
+    ldir = torch.nn.functional.normalize(ldir,dim=2)#[batch,lightnum,3]
+
+    static_zero = torch.zeros(1,device=n.device)
+
+    a = torch.max(torch.sum(ldir*torch.unsqueeze(n,dim=1),dim=2,keepdim=True),static_zero)#[batch,lightnum,1]
+    if not with_cos:
+        return a
+    b = dist*dist#[batch,lightnum,1]
+    c = torch.max(torch.sum(ldir*torch.unsqueeze(light_normals,dim=0),dim=2,keepdim=True),static_zero)#[batch,lightnum,1]
+    r_2_cos = b/(c+1e-6)
+    cos_r_2 = c/b
+    # self.endPoints[variable_scope_name+"r_2_cos"] = r_2_cos
+    # self.endPoints[variable_scope_name+"cos_r_2"] = cos_r_2
+    # self.endPoints[variable_scope_name+"cos2"] = a
+    return a/(b+1e-6)*c
+
 def draw_rendering_net(setup,device,input_params,position,rotate_theta,variable_scope_name,
     with_cos = True,pd_ps_wanted="both",rotate_point = True,specular_component="D_F_G_B",
     global_custom_frame=None,use_custom_frame="",rotate_frame=True,new_cam_pos=None,use_new_cam_pos=False):
@@ -278,8 +307,8 @@ def draw_rendering_net(setup,device,input_params,position,rotate_theta,variable_
                             torch.sum(view_dir*n,dim=1,keepdim=True)],dim=1)#shape is [batch,3]
     
     
-    form_factors = compute_form_factors(position,n,light_poses_broaded,light_normals_broaded,variable_scope_name,with_cos)#[batch,lightnum,1]
-    return None,wo_local
+    form_factors = compute_form_factors(position,n,light_poses,light_normals,end_points,with_cos)#[batch,lightnum,1]
+    return None,form_factors
     
     
     
