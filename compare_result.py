@@ -10,7 +10,7 @@ if __name__ == "__main__":
     tf_data = np.fromfile(args.work_space+"tf_result.bin",np.float32)
     torch_data = np.fromfile(args.work_space+"torch_result.bin",np.float32)
 
-    print("all close:",np.allclose(tf_data,torch_data))
+    print("all close:",np.allclose(tf_data,torch_data,1e-4))
     show_num = 10
     print("tf_data:",tf_data[:show_num])
     print("torch_data:",torch_data[:show_num])

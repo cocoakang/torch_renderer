@@ -50,7 +50,7 @@ if __name__ == "__main__":
         tmp_rottheta = test_rottheta[ptr:ptr+batch_size]
         rotate_theta_zero = torch.zeros(batch_size,1,dtype=torch.float32,device=device)#TODO this should be avoided!
         with MeasureDuration() as m:
-            # for i in range(10000):
+            # for i in range(5000):
             for i in range(1):
                 # if tmp_params.shape[0] == 0:
                 #     break
@@ -87,7 +87,7 @@ if __name__ == "__main__":
                 
                 used_rottheta = rotate_theta_zero
                 used_rottheta = input_rotatetheta
-                ground_truth_lumitexels_direct,test_node = torch_render.draw_rendering_net(setup,input_params,input_positions,used_rottheta,"ground_truth_renderer_direct")#[batch,lightnum,1]
+                ground_truth_lumitexels_direct,test_node = torch_render.draw_rendering_net(setup,device,input_params,input_positions,used_rottheta,"ground_truth_renderer_direct",rotate_frame=True)#[batch,lightnum,1]
 
 
         result = test_node.cpu().numpy()

@@ -172,11 +172,12 @@ def rotation_axis(t,v,isRightHand=True):
     res = res.view(-1,4,4)
     return res
 
-def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_name,
+def draw_rendering_net(setup,device,input_params,position,rotate_theta,variable_scope_name,
     with_cos = True,pd_ps_wanted="both",rotate_point = True,specular_component="D_F_G_B",
     global_custom_frame=None,use_custom_frame="",rotate_frame=True,new_cam_pos=None,use_new_cam_pos=False):
     '''
     setup is Setup_Config class
+    deivce is the rendering device
     input_params = (rendering parameters) shape = [self.fitting_batch_size,self.parameter_len] i.e.[24576,10]
     position = (rendering positions) shape=[self.fitting_batch_size,3]
     variable_scope_name = (for variable check a string like"rendering1") 
@@ -189,6 +190,7 @@ def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_n
     with_cos: if True,lumitexl is computed with cos and dir
     '''
     end_points = {}
+    batch_size = input_params.size()[0]
     ###[STEP 0]
     #load constants
     light_normals = setup.get_light_normal_torch()#[lightnum,3]
@@ -204,33 +206,20 @@ def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_n
     view_mat_for_normal_t = torch.transpose(view_mat_for_normal,1,2)#[batch,4,4]
 
     test_node = torch.cat([view_mat_model,view_mat_model_t,view_mat_for_normal,view_mat_for_normal_t],dim=0)
-    return None,test_node
+
     ###[STEP 1]
-    ##define input
-    with tf.variable_scope("fittinger"):
-        self.endPoints[variable_scope_name+"input_parameters"] = input_params
-        self.endPoints[variable_scope_name+"positions"] = position
-        view_dir = cam_pos - position #shape=[batch,3]
-        view_dir = self.normalized(view_dir)#shape=[batch,3]
-        self.endPoints[variable_scope_name+"view_dir"] = view_dir
-
-        #build local frame
-        frame_t,frame_b = self.build_frame_f_z(view_dir,None,with_theta=False)#[batch,3]
-        frame_n = view_dir
-        self.endPoints[variable_scope_name+"frame_t"] = frame_t
-        self.endPoints[variable_scope_name+"frame_b"] = frame_b
-        self.endPoints[variable_scope_name+"frame_n"] = frame_n
-
-
+    view_dir = cam_pos - position #shape=[batch,3]
+    view_dir = torch.nn.functional.normalize(view_dir,dim=1)#shape=[batch,3]
 
     ###[STEP 1.1]
     ###split input parameters into position and others
-    if self.if_grey_scale:
-        n_2d,theta,ax,ay,pd,ps = tf.split(input_params,[2,1,1,1,1,1],axis=1)
-        self.endPoints[variable_scope_name+"pd"] = pd
+    if input_params.size()[1] == 7:
+        n_2d,theta,ax,ay,pd,ps = torch.split(input_params,[2,1,1,1,1,1],dim=1)
+    elif input_params.size()[1] == 11:
+        n_2d,theta,ax,ay,pd,ps = torch.split(input_params,[2,1,1,1,3,3],dim=1)
     else:
-        n_2d,theta,ax,ay,pd,ps = tf.split(input_params,[2,1,1,1,3,3],axis=1)
-
+        print("[RENDER ERROR] error param len!")
+        exit(-1)
     #position shape=[bach,3]
     # n_2d = tf.clip_by_value(n_2d,0.0,1.0)
     if "n" in use_custom_frame:
@@ -239,34 +228,33 @@ def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_n
             t = global_custom_frame[1]
             b = global_custom_frame[2]
         else:
-            t,b = self.build_frame_f_z(n,None,with_theta=False)
+            t,b = build_frame_f_z(n,None,device,with_theta=False)
     else:
-        n_local = self.back_hemi_octa_map(n_2d)#[batch,3]
-        self.endPoints[variable_scope_name+"normal_local"] = n_local
-        t_local,_ = self.build_frame_f_z(n_local,theta,with_theta=True)
-        n_local_x,n_local_y,n_local_z = tf.split(n_local,[1,1,1],axis=1)#[batch,1],[batch,1],[batch,1]
-        n = n_local_x*frame_t+n_local_y*frame_b+n_local_z*frame_n#[batch,3]
-        self.endPoints[variable_scope_name+"normal"]  = n
-        t_local_x,t_local_y,t_local_z = tf.split(t_local,[1,1,1],axis=1)#[batch,1],[batch,1],[batch,1]
-        t = t_local_x*frame_t+t_local_y*frame_b+t_local_z*frame_n#[batch,3]
-        b = tf.cross(n,t)#[batch,3]
-    
+         #build local frame
+        frame_t,frame_b = build_frame_f_z(view_dir,None,device,with_theta=False)#[batch,3]
+        frame_n = view_dir#[batch,3]
+
+        n_local = back_hemi_octa_map(n_2d)#[batch,3]
+        t_local,_ = build_frame_f_z(n_local,theta,device,with_theta=True)
+        n = n_local[:,[0]]*frame_t+n_local[:,[1]]*frame_b+n_local[:,[2]]*frame_n#[batch,3]
+        t = t_local[:,[0]]*frame_t+t_local[:,[1]]*frame_b+t_local[:,[2]]*frame_n#[batch,3]
+        b = torch.cross(n,t)#[batch,3]
+
     if rotate_frame:
         #rotate frame
-        pn = tf.expand_dims(tf.concat([n,tf.ones([n.shape[0],1],tf.float32)],axis=1),axis=1)
-        pt = tf.expand_dims(tf.concat([t,tf.ones([t.shape[0],1],tf.float32)],axis=1),axis=1)
-        pb = tf.expand_dims(tf.concat([b,tf.ones([b.shape[0],1],tf.float32)],axis=1),axis=1)
+        tmp_ones = torch.ones(batch_size,1,dtype=torch.float32,device=device)
+        pn = torch.unsqueeze(torch.cat([n,tmp_ones],dim=1),1)#[batch,1,4]
+        pt = torch.unsqueeze(torch.cat([t,tmp_ones],dim=1),1)#[batch,1,4]
+        pb = torch.unsqueeze(torch.cat([b,tmp_ones],dim=1),1)#[batch,1,4]
 
-        n = tf.squeeze(tf.matmul(pn,view_mat_for_normal_t),axis=1)
-        t = tf.squeeze(tf.matmul(pt,view_mat_for_normal_t),axis=1)
-        b = tf.squeeze(tf.matmul(pb,view_mat_for_normal_t),axis=1)
-        n,_ = tf.split(n,[3,1],axis=1)#shape=[batch,3]          
-        t,_ = tf.split(t,[3,1],axis=1)#shape=[batch,3]
-        b,_ = tf.split(b,[3,1],axis=1)#shape=[batch,3]
-
-    self.endPoints[variable_scope_name+"n"] = n
-    self.endPoints[variable_scope_name+"t"] = t
-    self.endPoints[variable_scope_name+"b"] = b
+        n = torch.squeeze(torch.matmul(pn,view_mat_for_normal_t),1)[:,:3]#[batch,1,4]
+        t = torch.squeeze(torch.matmul(pt,view_mat_for_normal_t),1)[:,:3]
+        b = torch.squeeze(torch.matmul(pb,view_mat_for_normal_t),1)[:,:3]
+        
+    return None,torch.cat([n,t,b],dim=1)
+    # self.endPoints[variable_scope_name+"n"] = n
+    # self.endPoints[variable_scope_name+"t"] = t
+    # self.endPoints[variable_scope_name+"b"] = b
     # n = tf.tile(tf.constant([0,0,1],dtype=tf.float32,shape=[1,3]),[self.fitting_batch_size,1])#self.normalized(n)
     # t = tf.tile(tf.constant([0,1,0],dtype=tf.float32,shape=[1,3]),[self.fitting_batch_size,1])#self.normalized(t)
     # ax = tf.clip_by_value(ax,0.006,0.503)
