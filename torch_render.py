@@ -1,4 +1,5 @@
 import torch
+import math
 import numpy as np
 
 def hemi_octa_map(dir):
@@ -194,12 +195,118 @@ def compute_form_factors(position,n,light_poses,light_normals,end_points,with_co
         return a
     b = dist*dist#[batch,lightnum,1]
     c = torch.max(torch.sum(ldir*torch.unsqueeze(light_normals,dim=0),dim=2,keepdim=True),static_zero)#[batch,lightnum,1]
-    r_2_cos = b/(c+1e-6)
-    cos_r_2 = c/b
+    # r_2_cos = b/(c+1e-6)
+    # cos_r_2 = c/b
     # self.endPoints[variable_scope_name+"r_2_cos"] = r_2_cos
     # self.endPoints[variable_scope_name+"cos_r_2"] = cos_r_2
     # self.endPoints[variable_scope_name+"cos2"] = a
     return a/(b+1e-6)*c
+
+def ggx_G1_aniso_honntai(v,vz,ax,ay):
+    axayaz = torch.cat([ax,ay,torch.ones_like(ax)],dim=1)#[batch,3]
+    vv = v*torch.unsqueeze(axayaz,dim=1)#[batch,lightnum,3]
+    # return 2.0/(1.0+(self.norm(vv)/(vz+1e-6)))
+    return 2.0*vz/(vz+torch.norm(vv,dim=2,keepdim=True)+1e-6)#[batch,lightnum,1]
+
+def ggx_G1_aniso(v,ax,ay,vz):
+    '''
+    v = [batch,lightnum,3]
+    ax = [batch,1]
+    ay = [batch,1]
+    vz = [batch,lightnum,1] 
+    return shape = [batch,lightnum,1]
+    '''
+    return torch.where(torch.le(vz,torch.zeros_like(vz)),torch.zeros_like(vz),ggx_G1_aniso_honntai(v,vz,ax,ay))#[batch,lightnum,1]
+
+    # comparison = (tf.sign(vz)+1.0)*0.5
+    # hontai = ggx_G1_aniso_honntai(v,vz,ax,ay)
+    # return hontai*comparison
+
+def ggx_brdf_aniso(wi,wo,ax,ay,specular_component):
+    '''
+    wi = [batch,lightnum,3]
+    wo = [batch,3]
+    ax = [batch,1]
+    ay = [batch,1]
+    return shape = [batch,lightnum,1]
+    '''
+    static_one = torch.ones(1,device=wi.device,dtype=torch.float32)
+    static_zero = torch.zeros_like(static_one)
+
+    wo = torch.unsqueeze(wo,dim=1).repeat(1,wi.size()[1],1)#[batch,lightnum,3]
+
+    wi_z = wi[:,:,[2]]#tf.expand_dims(tf.gather(wi,indices=2,axis=2,name="wi_z"),axis=-1)#shape=[batch,lightnum,1]
+    wo_z = wo[:,:,[2]]#tf.expand_dims(tf.gather(wo,indices=2,axis=2,name="wo_z"),axis=-1)#shape=[batch,lightnum,1]
+    denom = 4*wi_z*wo_z#shape=[batch,lightnum,1]
+    vhalf = torch.nn.functional.normalize(wi+wo,dim=2)#[batch,lightnum,3]
+    tmp = torch.min(torch.max(1.0-torch.sum(wi*vhalf,dim=2,keepdim=True),static_zero),static_one)#[batch,lightnum,1]
+    F0 = 0.04
+    F = F0+(1-F0)* tmp * tmp * tmp * tmp * tmp#[batch,lightnum,1]
+    
+    axayaz = torch.unsqueeze(torch.cat([ax,ay,torch.ones_like(ax)],dim=1),dim=1)#[batch,1,3]
+    vhalf = vhalf/(axayaz+1e-6)#[batch,lightnum,3]
+    vhalf_norm = torch.norm(vhalf,dim=2,keepdim=True)#[batch,lightnum,1]
+    length = vhalf_norm*vhalf_norm##[batch,lightnum,1]
+    D = 1.0/(math.pi*torch.unsqueeze(ax,dim=1)*torch.unsqueeze(ay,dim=1)*length*length)#[batch,lightnum,1]
+
+    judgement_wiz_less_equal_0 = torch.le(wi_z,static_zero)
+    judgement_woz_less_equal_0 = torch.le(wo_z,static_zero)
+
+    tmp_ones = torch.ones_like(denom)
+    safe_denom = torch.where(judgement_wiz_less_equal_0,tmp_ones,denom)
+    safe_denom = torch.where(judgement_woz_less_equal_0,tmp_ones,safe_denom)
+
+    tmp = tmp_ones
+    if "D" in specular_component:
+        tmp = tmp * D
+    if "F" in specular_component:
+        tmp = tmp * F
+    if "G" in specular_component:
+        tmp = tmp * ggx_G1_aniso(wi,ax,ay,wi_z)*ggx_G1_aniso(wo,ax,ay,wo_z)
+    if "B" in specular_component:
+        tmp = tmp / (safe_denom+1e-6) 
+    
+    #[batch,lightnum,1]
+
+    
+    tmp_zeros = torch.zeros_like(tmp)
+
+
+    res = torch.where(judgement_wiz_less_equal_0,tmp_zeros,tmp)
+    res = torch.where(judgement_woz_less_equal_0,tmp_zeros,res)
+
+    # wi_z_sign = (tf.sign(wi_z)+1.0)*0.5#shape=[batch,lightnum,1]
+    # wo_z_sign = (tf.sign(wo_z)+1.0)*0.5#shape=[batch,lightnum,1]
+    
+    # # res = tmp*wi_z_sign*wo_z_sign
+    # self.endPoints["4"] = wi_z_sign
+    # self.endPoints["5"] = wo_z_sign
+    # self.endPoints["6"] = denom+1e-6
+    return res
+
+def calc_light_brdf(wi_local,wo_local,ax,ay,pd,ps,pd_ps_wanted,specular_component):
+    '''
+    wi_local = [batch,lightnum,3]
+    wo_local = [batch,3]
+    ax = [batch,1]
+    ay = [batch,1]
+    pd = [batch,channel]
+    ps = [batch,channel]
+    return shape=[batch,lightnum,channel]
+    '''
+    if pd_ps_wanted == "both":
+        b = ggx_brdf_aniso(wi_local,wo_local,ax,ay,specular_component)#[batch,lightnum,1]
+        ps = torch.unsqueeze(ps,dim=1)#[batch,1,channel]
+        a = torch.unsqueeze(pd/math.pi,dim=1)#[batch,1,1]
+        return a+b*ps
+    elif pd_ps_wanted =="pd_only":
+        a = torch.unsqueeze(pd/math.pi,dim=1)#[batch,1,1]
+        return a.repeat(1,wi_local.size()[1],1)
+    elif pd_ps_wanted == "ps_only":
+        b = ggx_brdf_aniso(wi_local,wo_local,ax,ay,specular_component)#[batch,lightnum,1]
+        ps = torch.unsqueeze(ps,dim=1)#[batch,1,channel]
+        return b*ps
+    # return b*ps# return a+b*ps
 
 def draw_rendering_net(setup,device,input_params,position,rotate_theta,variable_scope_name,
     with_cos = True,pd_ps_wanted="both",rotate_point = True,specular_component="D_F_G_B",
@@ -308,31 +415,19 @@ def draw_rendering_net(setup,device,input_params,position,rotate_theta,variable_
     
     
     form_factors = compute_form_factors(position,n,light_poses,light_normals,end_points,with_cos)#[batch,lightnum,1]
-    return None,form_factors
-    
-    
-    
-    lumi = self.calc_light_brdf(wi_local,wo_local,ax,ay,pd,ps,pd_ps_wanted,specular_component)#[batch,lightnum,channel]
-    self.endPoints[variable_scope_name+"lumi_without_formfactor"] = lumi
+
+    lumi = calc_light_brdf(wi_local,wo_local,ax,ay,pd,ps,pd_ps_wanted,specular_component)#[batch,lightnum,channel]
     
     lumi = lumi*form_factors*1e4*math.pi*1e-2#[batch,lightnum,channel]
 
-    wi_dot_n = self.dot_ndm_vector(wi,tf.expand_dims(n,axis=1))#[batch,lightnum,1]
-    lumi = lumi*((tf.sign(wi_dot_n)+1.0)*0.5)
-    # judgements = tf.less(wi_dot_n,1e-5)
-    # lumi = tf.where(judgements,tf.zeros([self.fitting_batch_size,self.lumitexel_size,1]),lumi)
+    wi_dot_n = torch.sum(wi*torch.unsqueeze(n,dim=1),dim=2,keepdim=True)#[batch,lightnum,1]
+    # lumi = lumi*((tf.sign(wi_dot_n)+1.0)*0.5)
+    lumi = torch.where(torch.lt(wi_dot_n,1e-5),torch.zeros_like(lumi),lumi)#[batch,lightnum,channel]
 
-    n_dot_views = self.dot_ndm_vector(view_dir,n)#[batch,1]
-    n_dot_view_dir = tf.tile(tf.expand_dims(n_dot_views,axis=1),[1,self.lumitexel_size,1])#[batch,lightnum,1]
-    
-    self.endPoints[variable_scope_name+"n_dot_view_dir"] = n_dot_views
+    n_dot_views = torch.sum(view_dir*n,dim=1,keepdim=True)#[batch,1]
+    n_dot_view_dir = torch.unsqueeze(n_dot_views,dim=1).repeat(1,light_num,1)#tf.tile(tf.expand_dims(n_dot_views,axis=1),[1,self.lumitexel_size,1])#[batch,lightnum,1]
 
-    judgements = tf.less(n_dot_view_dir,0.0)
-    if self.if_grey_scale:
-        rendered_results = tf.where(judgements,tf.zeros([self.fitting_batch_size,self.lumitexel_size,1]),lumi)#[batch,lightnum]
-    else:
-        rendered_results = tf.where(tf.tile(judgements,[1,1,3]),tf.zeros([self.fitting_batch_size,self.lumitexel_size,3]),lumi)#[batch,lightnum]
-    self.endPoints[variable_scope_name+"rendered_results"] = rendered_results
+    rendered_results = torch.where(torch.lt(n_dot_view_dir,0.0),torch.zeros_like(lumi),lumi)#[batch,lightnum]
 
     return rendered_results
 

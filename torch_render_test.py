@@ -61,37 +61,37 @@ if __name__ == "__main__":
                     
 
                 
-                
-                input_params = torch.from_numpy(tmp_params).to(device)
-                input_positions = torch.from_numpy(tmp_positions).to(device)
-                input_rotatetheta = torch.from_numpy(tmp_rottheta).to(device)
-                n_2d,theta,axay,pd3,ps3 = torch.split(input_params,[2,1,2,3,3],dim=1)
-                n_local = torch_render.back_hemi_octa_map(n_2d)
-                t_local,_ = torch_render.build_frame_f_z(n_local,theta,device,with_theta=True)
+                with torch.no_grad():
+                    input_params = torch.from_numpy(tmp_params).to(device)
+                    input_positions = torch.from_numpy(tmp_positions).to(device)
+                    input_rotatetheta = torch.from_numpy(tmp_rottheta).to(device)
+                    n_2d,theta,axay,pd3,ps3 = torch.split(input_params,[2,1,2,3,3],dim=1)
+                    n_local = torch_render.back_hemi_octa_map(n_2d)
+                    t_local,_ = torch_render.build_frame_f_z(n_local,theta,device,with_theta=True)
 
-                view_dir = cam_pos_list_torch[0] - input_positions #shape=[batch,3]
-                view_dir = torch.nn.functional.normalize(view_dir,dim=1)#shape=[batch,3]
-                
-                #build local frame
-                frame_t,frame_b = torch_render.build_frame_f_z(view_dir,None,device,with_theta=False)#[batch,3]
-                frame_n = view_dir
+                    view_dir = cam_pos_list_torch[0] - input_positions #shape=[batch,3]
+                    view_dir = torch.nn.functional.normalize(view_dir,dim=1)#shape=[batch,3]
+                    
+                    #build local frame
+                    frame_t,frame_b = torch_render.build_frame_f_z(view_dir,None,device,with_theta=False)#[batch,3]
+                    frame_n = view_dir
 
-                n_local_x,n_local_y,n_local_z = torch.split(n_local,[1,1,1],dim=1)#[batch,1],[batch,1],[batch,1]
+                    n_local_x,n_local_y,n_local_z = torch.split(n_local,[1,1,1],dim=1)#[batch,1],[batch,1],[batch,1]
 
-                normal = n_local_x*frame_t+n_local_y*frame_b+n_local_z*frame_n#[batch,3]
-                t_local_x,t_local_y,t_local_z = torch.split(t_local,[1,1,1],dim=1)#[batch,1],[batch,1],[batch,1]
-                tangent = t_local_x*frame_t+t_local_y*frame_b+t_local_z*frame_n#[batch,3]
-                binormal = torch.cross(normal,tangent)#[batch,3]
+                    normal = n_local_x*frame_t+n_local_y*frame_b+n_local_z*frame_n#[batch,3]
+                    t_local_x,t_local_y,t_local_z = torch.split(t_local,[1,1,1],dim=1)#[batch,1],[batch,1],[batch,1]
+                    tangent = t_local_x*frame_t+t_local_y*frame_b+t_local_z*frame_n#[batch,3]
+                    binormal = torch.cross(normal,tangent)#[batch,3]
 
-                global_frame = [normal,tangent,binormal]
-                
-                used_rottheta = rotate_theta_zero
-                used_rottheta = input_rotatetheta
-                ground_truth_lumitexels_direct,test_node = torch_render.draw_rendering_net(setup,device,input_params,input_positions,used_rottheta,"ground_truth_renderer_direct")#[batch,lightnum,1]
-
+                    global_frame = [normal,tangent,binormal]
+                    
+                    used_rottheta = rotate_theta_zero
+                    used_rottheta = input_rotatetheta
+                    ground_truth_lumitexels_direct = torch_render.draw_rendering_net(setup,device,input_params,input_positions,used_rottheta,"ground_truth_renderer_direct")#[batch,lightnum,1]
+                    test_node = ground_truth_lumitexels_direct
 
         result = test_node.cpu().numpy()
-        print(result)
+        # print(result)
     
         result.astype(np.float32).tofile(pf_output)
 
