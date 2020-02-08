@@ -328,12 +328,12 @@ def compute_wo_dot_n(setup,position,rotate_theta,n,new_cam_pos):
         assert len(shape_of_cam) == 2, "shape of cam should be in rank 2,now:{}".format(shape_of_cam)
         assert shape_of_cam[0] == batch_size and shape_of_cam[1] == 3, "shape of cam should be in rank 2 and first is batchsize,second is 3,now:{}".format(shape_of_cam)
     
-    view_mat_model = rotation_axis(rotate_theta,setup.get_rot_axis_torch())#[batch,4,4]
+    view_mat_model = rotation_axis(rotate_theta,setup.get_rot_axis_torch(device))#[batch,4,4]
     view_mat_model_t = torch.transpose(view_mat_model,1,2)
     view_mat_for_normal =torch.transpose(torch.inverse(view_mat_model),1,2)
     view_mat_for_normal_t = torch.transpose(view_mat_for_normal,1,2)
 
-    static_tmp_ones = torch.ones(batch_size,1,dtype=torch.float32,device=device)
+    static_tmp_ones = torch.ones(batch_size,1,dtype=n.dtype,device=device)
     pn = torch.unsqueeze(torch.cat([n,static_tmp_ones],dim=1),1)#[batch,1,4]
     
     n = torch.squeeze(torch.matmul(pn,view_mat_for_normal_t),1)[:,:3]
@@ -364,16 +364,17 @@ def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_n
     '''
     end_points = {}
     batch_size = input_params.size()[0]
+    device = input_params.device
     ###[STEP 0]
     #load constants
-    light_normals = setup.get_light_normal_torch()#[lightnum,3]
-    light_poses = setup.get_light_poses_torch()#[lightnum,3],
+    light_normals = setup.get_light_normal_torch(device)#[lightnum,3]
+    light_poses = setup.get_light_poses_torch(device)#[lightnum,3],
     light_num = light_poses.size()[0]
-    cam_pos = setup.get_cam_pos_torch()#[3]
+    cam_pos = setup.get_cam_pos_torch(device)#[3]
     if use_new_cam_pos:
         cam_pos = new_cam_pos
     #rotate object           
-    view_mat_model = rotation_axis(rotate_theta,setup.get_rot_axis_torch())#[batch,4,4]
+    view_mat_model = rotation_axis(rotate_theta,setup.get_rot_axis_torch(device))#[batch,4,4]
     view_mat_model_t = torch.transpose(view_mat_model,1,2)#[batch,4,4]
 
     view_mat_for_normal =torch.transpose(torch.inverse(view_mat_model),1,2)#[batch,4,4]
@@ -479,7 +480,7 @@ class Setup_Config(object):
         #load configs
         self.cam_pos = np.fromfile(config_file_dir+"cam_pos.bin",np.float32)
         assert self.cam_pos.shape[0] == 3
-        print("[RENDERER]cam_pos:",self.cam_pos)
+        print("[SETUP]cam_pos:",self.cam_pos)
         
         tmp_data = np.fromfile(config_file_dir+"lights.bin",np.float32).reshape([2,-1,3])
         self.light_poses = tmp_data[0]
@@ -487,30 +488,42 @@ class Setup_Config(object):
 
         self.rot_axis = np.array([0.0,0.0,1.0],np.float32)# TODO read from calibration file
     
-    def get_cam_pos_torch(self):
-        try:
-            return self.cam_pos_torch
-        except AttributeError:
-            self.cam_pos_torch = torch.from_numpy(self.cam_pos).to(self.device)
-            return self.cam_pos_torch
+    # def get_cam_pos_torch(self):
+    #     try:
+    #         return self.cam_pos_torch
+    #     except AttributeError:
+    #         self.cam_pos_torch = torch.from_numpy(self.cam_pos).to(self.device)
+    #         return self.cam_pos_torch
+    
+    def get_cam_pos_torch(self,custom_device):
+        return torch.from_numpy(self.cam_pos).to(custom_device)
    
-    def get_light_normal_torch(self):
-        try:
-            return self.light_normals_torch
-        except AttributeError:
-            self.light_normals_torch = torch.from_numpy(self.light_normals).to(self.device)
-            return self.light_normals_torch
+    # def get_light_normal_torch(self):
+    #     try:
+    #         return self.light_normals_torch
+    #     except AttributeError:
+    #         self.light_normals_torch = torch.from_numpy(self.light_normals).to(self.device)
+    #         return self.light_normals_torch
+
+    def get_light_normal_torch(self,custom_device):
+        return torch.from_numpy(self.light_normals).to(custom_device)
+
+    # def get_light_poses_torch(self):
+    #     try:
+    #         return self.light_poses_torch
+    #     except AttributeError:
+    #         self.light_poses_torch = torch.from_numpy(self.light_poses).to(self.device)
+    #         return self.light_poses_torch
     
-    def get_light_poses_torch(self):
-        try:
-            return self.light_poses_torch
-        except AttributeError:
-            self.light_poses_torch = torch.from_numpy(self.light_poses).to(self.device)
-            return self.light_poses_torch
+    def get_light_poses_torch(self,custom_device):
+        return torch.from_numpy(self.light_poses).to(custom_device)
+
+    # def get_rot_axis_torch(self):
+    #     try:
+    #         return self.rot_axis_torch
+    #     except AttributeError:
+    #         self.rot_axis_torch = torch.from_numpy(self.rot_axis).to(self.device)
+    #         return self.rot_axis_torch
     
-    def get_rot_axis_torch(self):
-        try:
-            return self.rot_axis_torch
-        except AttributeError:
-            self.rot_axis_torch = torch.from_numpy(self.rot_axis).to(self.device)
-            return self.rot_axis_torch
+    def get_rot_axis_torch(self,custom_device):
+        return torch.from_numpy(self.rot_axis).to(custom_device)
