@@ -134,7 +134,7 @@ def build_frame_f_z(n,theta,with_theta=True):
 def rotation_axis(t,v,isRightHand=True):
     '''
     t = [batch,1]#rotate rad
-    v = [3]#rotate axis(global) 
+    v = [batch,3] or [3]#rotate axis(global) 
     return = [batch,4,4]#rotate matrix
     '''
     if isRightHand:
@@ -148,17 +148,19 @@ def rotation_axis(t,v,isRightHand=True):
     c = torch.cos(theta)#[batch,1]
     s = torch.sin(theta)#[batch,1]
 
-    m_11 = c + (1-c)*v[0]*v[0]
-    m_12 = (1 - c)*v[0]*v[1] - s*v[2]
-    m_13 = (1 - c)*v[0]*v[2] + s*v[1]
+    v_x,v_y,v_z = torch.split(v,[1,1,1],dim=-1)
 
-    m_21 = (1 - c)*v[0]*v[1] + s*v[2]
-    m_22 = c + (1-c)*v[1]*v[1]
-    m_23 = (1 - c)*v[1]*v[2] - s*v[0]
+    m_11 = c + (1-c)*v_x*v_x
+    m_12 = (1 - c)*v_x*v_y - s*v_z
+    m_13 = (1 - c)*v_x*v_z + s*v_y
 
-    m_31 = (1 - c)*v[2]*v[0] - s*v[1]
-    m_32 = (1 - c)*v[2]*v[1] + s*v[0]
-    m_33 = c + (1-c)*v[2]*v[2]
+    m_21 = (1 - c)*v_x*v_y + s*v_z
+    m_22 = c + (1-c)*v_y*v_y
+    m_23 = (1 - c)*v_y*v_z - s*v_x
+
+    m_31 = (1 - c)*v_z*v_x - s*v_y
+    m_32 = (1 - c)*v_z*v_y + s*v_x
+    m_33 = c + (1-c)*v_z*v_z
 
     tmp_zeros = torch.zeros_like(t)
     tmp_ones = torch.ones_like(t)
@@ -307,6 +309,42 @@ def calc_light_brdf(wi_local,wo_local,ax,ay,pd,ps,pd_ps_wanted,specular_componen
         ps = torch.unsqueeze(ps,dim=1)#[batch,1,channel]
         return b*ps
     # return b*ps# return a+b*ps
+
+def compute_wo_dot_n(setup,position,rotate_theta,n,new_cam_pos):
+    '''
+    This is a bare function which means it doen't use any data of this class!
+    
+    position:[batchsize,3] global position of a point in guminyi frame
+    rotate_theta:[batchsize,1] rotate theta
+    n:[batchsize , 3] global normal in guminyi frame 
+    new_cam_pos:[batchsize,3]or (3,) cam pos in guminyi frame
+    '''
+    batch_size = position.size()[0]
+    device = position.device
+    shape_of_cam = new_cam_pos.size()
+    if len(shape_of_cam) == 1:
+        new_cam_pos = torch.unsqueeze(new_cam_pos,dim=0)#[1,3]
+    else:
+        assert len(shape_of_cam) == 2, "shape of cam should be in rank 2,now:{}".format(shape_of_cam)
+        assert shape_of_cam[0] == batch_size and shape_of_cam[1] == 3, "shape of cam should be in rank 2 and first is batchsize,second is 3,now:{}".format(shape_of_cam)
+    
+    view_mat_model = rotation_axis(rotate_theta,setup.get_rot_axis_torch())#[batch,4,4]
+    view_mat_model_t = torch.transpose(view_mat_model,1,2)
+    view_mat_for_normal =torch.transpose(torch.inverse(view_mat_model),1,2)
+    view_mat_for_normal_t = torch.transpose(view_mat_for_normal,1,2)
+
+    static_tmp_ones = torch.ones(batch_size,1,dtype=torch.float32,device=device)
+    pn = torch.unsqueeze(torch.cat([n,static_tmp_ones],dim=1),1)#[batch,1,4]
+    
+    n = torch.squeeze(torch.matmul(pn,view_mat_for_normal_t),1)[:,:3]
+    
+    position = torch.unsqueeze(torch.cat([position,static_tmp_ones],dim=1),1)#[batch,1,4]#tf.expand_dims(tf.concat([position,tf.ones([position.shape[0],1],tf.float32)],axis=1),axis=1)
+    position = torch.squeeze(torch.matmul(position,view_mat_model_t),1)[:,:3]#position@view_mat_model_t#shape=[batch,3]
+
+    view_dir = torch.nn.functional.normalize(new_cam_pos - position,dim=1)#shape=[batch,3]
+    n_dot_views = torch.sum(view_dir*n,dim=1,keepdim=True)#[batch,1]
+
+    return n_dot_views
 
 def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_name,
     with_cos = True,pd_ps_wanted="both",rotate_point = True,specular_component="D_F_G_B",
