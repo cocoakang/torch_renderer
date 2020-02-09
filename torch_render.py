@@ -429,7 +429,7 @@ def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_n
     if rotate_point:
         position = torch.unsqueeze(torch.cat([position,static_tmp_ones],dim=1),dim=1)#[batch,1,4]
         position = torch.squeeze(torch.matmul(position,view_mat_model_t),dim=1)[:,:3]#shape=[batch,3]
-        
+    end_points["n"] = n
     ###[STEP 2]
     ##define rendering
 
@@ -463,17 +463,18 @@ def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_n
     lumi = torch.where(torch.lt(wi_dot_n,1e-5),torch.zeros_like(lumi),lumi)#[batch,lightnum,channel]
 
     n_dot_views = torch.sum(view_dir*n,dim=1,keepdim=True)#[batch,1]
+    end_points["n_dot_view_dir"] = n_dot_views
     n_dot_view_dir = torch.unsqueeze(n_dot_views,dim=1).repeat(1,light_num,1)#tf.tile(tf.expand_dims(n_dot_views,axis=1),[1,self.lumitexel_size,1])#[batch,lightnum,1]
 
     rendered_results = torch.where(torch.lt(n_dot_view_dir,0.0),torch.zeros_like(lumi),lumi)#[batch,lightnum]
 
-    return rendered_results
+    return rendered_results,end_points
 
 class Setup_Config(object):
     
     def __init__(self,args):
         self.config_dir = args["config_dir"]
-        self.device = args["device"]
+        # self.device = args["device"]
         self.load_constants_from_bin(self.config_dir)
 
     def load_constants_from_bin(self,config_file_dir):
