@@ -470,6 +470,28 @@ def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_n
 
     return rendered_results,end_points
 
+def visualize_lumi(lumi,setup_config,is_batch_lumi=True):
+    '''
+    if is_batch_lumi:
+        lumi=(batch,lumilen,channel_num) or (batch,lumilen)
+        return=(batch,img_height,img_width,3) or (batch,img_height,img_width,1)
+    else:
+        lumi=(lumilen,channel_num) or (lumilen)
+        return=(img_height,img_width,3) or (img_height,img_width,1)
+    '''
+    if (is_batch_lumi and len(lumi.shape) == 2) or ((not is_batch_lumi) and len(lumi.shape) == 1):
+        lumi = np.expand_dims(lumi,axis=-1)
+
+    tmp_img = np.repeat(np.expand_dims(np.zeros(setup_config.img_size,lumi.dtype),axis=-1),lumi.shape[-1],axis=-1)
+    if is_batch_lumi:
+        tmp_img = np.repeat(np.expand_dims(tmp_img,axis=0),lumi.shape[0],axis=0)
+        tmp_img[:,setup_config.visualize_map[:,1],setup_config.visualize_map[:,0]] = lumi
+    else:
+        tmp_img[setup_config.visualize_map[:,1],setup_config.visualize_map[:,0]] = lumi
+    
+    return tmp_img
+
+
 class Setup_Config(object):
     
     def __init__(self,args):
@@ -488,6 +510,10 @@ class Setup_Config(object):
         self.light_normals = tmp_data[1]
 
         self.rot_axis = np.array([0.0,0.0,1.0],np.float32)# TODO read from calibration file
+
+        with open(self.config_dir+"visualize_config_torch.bin","rb") as pf:
+            self.img_size = np.fromfile(pf,np.int32,2)
+            self.visualize_map = np.fromfile(pf,np.int32).reshape([-1,2])
     
     # def get_cam_pos_torch(self):
     #     try:
