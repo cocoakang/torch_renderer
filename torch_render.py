@@ -430,6 +430,9 @@ def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_n
         position = torch.unsqueeze(torch.cat([position,static_tmp_ones],dim=1),dim=1)#[batch,1,4]
         position = torch.squeeze(torch.matmul(position,view_mat_model_t),dim=1)[:,:3]#shape=[batch,3]
     end_points["n"] = n
+    end_points["t"] = t
+    end_points["b"] = b
+    end_points["position"] = position
     ###[STEP 2]
     ##define rendering
 
