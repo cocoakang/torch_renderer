@@ -470,7 +470,7 @@ def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_n
 
     return rendered_results,end_points
 
-def visualize_lumi(lumi,setup_config,is_batch_lumi=True):
+def visualize_lumi(lumi,setup_config,is_batch_lumi=True,resize=True):
     '''
     if is_batch_lumi:
         lumi=(batch,lumilen,channel_num) or (batch,lumilen)
@@ -488,7 +488,17 @@ def visualize_lumi(lumi,setup_config,is_batch_lumi=True):
         tmp_img[:,setup_config.visualize_map[:,1],setup_config.visualize_map[:,0]] = lumi
     else:
         tmp_img[setup_config.visualize_map[:,1],setup_config.visualize_map[:,0]] = lumi
-    
+        tmp_img = np.expand_dims(tmp_img,axis=0)
+    #size=(img_num,originheight,originwidth,channel) at this moment
+    if resize:
+        ratio = 64 * 3 //setup_config.img_size[0]
+        tmp_img = np.expand_dims(np.expand_dims(tmp_img,axis=3),axis=2)#size=(img_num,originheight,1,originwidth,1,channel) at this moment
+        tmp_img = np.repeat(np.repeat(tmp_img,ratio,axis=2),ratio,axis=4)
+        tmp_img = np.reshape(tmp_img,[tmp_img.shape[0],64*3,64*4,tmp_img.shape[5]])
+
+    if not is_batch_lumi:
+        tmp_img = np.squeeze(tmp_img,axis=0)
+
     return tmp_img
 
 
