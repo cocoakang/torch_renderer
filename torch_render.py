@@ -477,10 +477,10 @@ def visualize_lumi(lumi,setup_config,is_batch_lumi=True,resize=True):
     '''
     if is_batch_lumi:
         lumi=(batch,lumilen,channel_num) or (batch,lumilen)
-        return=(batch,img_height,img_width,3) or (batch,img_height,img_width,1)
+        return=(batch,img_height,img_width,3)
     else:
         lumi=(lumilen,channel_num) or (lumilen)
-        return=(img_height,img_width,3) or (img_height,img_width,1)
+        return=(img_height,img_width,3)
     '''
     if (is_batch_lumi and len(lumi.shape) == 2) or ((not is_batch_lumi) and len(lumi.shape) == 1):
         lumi = np.expand_dims(lumi,axis=-1)
@@ -492,18 +492,83 @@ def visualize_lumi(lumi,setup_config,is_batch_lumi=True,resize=True):
     else:
         tmp_img[setup_config.visualize_map[:,1],setup_config.visualize_map[:,0]] = lumi
         tmp_img = np.expand_dims(tmp_img,axis=0)
-    #size=(img_num,originheight,originwidth,channel) at this moment
+    #size=(img_num,originheight,originwidth,3) at this moment
+    if tmp_img.shape[3] == 1:
+        tmp_img = np.repeat(tmp_img,3,axis=3)
     if resize:
-        ratio = 64 * 3 //setup_config.img_size[0]
+        ratio = setup_config.full_face_size * 3 //setup_config.img_size[0]
         tmp_img = np.expand_dims(np.expand_dims(tmp_img,axis=3),axis=2)#size=(img_num,originheight,1,originwidth,1,channel) at this moment
         tmp_img = np.repeat(np.repeat(tmp_img,ratio,axis=2),ratio,axis=4)
-        tmp_img = np.reshape(tmp_img,[tmp_img.shape[0],64*3,64*4,tmp_img.shape[5]])
+        tmp_img = np.reshape(tmp_img,[tmp_img.shape[0],setup_config.full_face_size*3,setup_config.full_face_size*4,tmp_img.shape[5]])
 
     if not is_batch_lumi:
         tmp_img = np.squeeze(tmp_img,axis=0)
 
     return tmp_img
 
+def draw_vector_on_lumi(lumi_img,vector_to_draw,positions,setup_config,is_batch_lumi,color,resize=True,bold=3,length=7):
+    '''
+    if is_batch_lumi:
+        lumi_img=(batch,lumi_img_height(full or not),lumi_img_width(full or not),channel_num)
+        positions = (batch,3)
+        vector_to_draw = (batch,3)
+        return=(batch,lumi_img_height(full or not),lumi_img_width(full or not),3)
+    else:
+        lumi_img=(lumi_img_height(full or not),lumi_img_width(full or not),channel_num)
+        positions = (3,)
+        vector_to_draw = (3,)
+        return=(lumi_img_height(full or not),lumi_img_width(full or not),3)
+    '''
+
+    if not is_batch_lumi:
+        lumi_img = np.expand_dims(lumi_img,axis=0)
+        positions = np.expand_dims(positions,axis=0)
+        vector_to_draw = np.expand_dims(vector_to_draw,axis=0)
+
+    if lumi_img.shape[3] == 1:
+        lumi_img = np.repeat(lumi_img,3,axis=3)
+    if hasattr(color,"__len__"):
+        color = np.ones(3,dtype=lumi_img.dtype)*color
+    batch_size = lumi_img.shape[0]
+    #lumi_img = (batch,lumi_img_height(full or not),lumi_img_width(full or not),3) at this moment
+    #positions = (batch,3)
+    #vector_to_draw = (batch,3)
+    #color = (3,)
+
+    #get closest light
+    light_dir = np.expand_dims(setup_config.light_poses,axis=0) - np.expand_dims(positions,axis=1) #(batch,lightnum,3)
+    light_dir = light_dir/np.linalg.norm(light_dir,axis=2,keepdims=True)#(batch,lightnum,3)
+
+    dot_res = np.sum(light_dir*np.expand_dims(vector_to_draw,axis=1),axis=2)#(batch,lightnum)
+    max_idx = np.argmax(dot_res,axis=1)#(batch,)
+    
+    #draw vector in shrinked img
+    tmp_img = np.repeat(np.expand_dims(np.zeros([setup_config.img_size[0],setup_config.img_size[1],3],dtype=lumi_img.dtype),axis=0),batch_size,axis=0)#(batch,shrinked_height,shrinked_width,3)
+    mask = np.zeros_like(tmp_img)
+    light_idxes = setup_config.visualize_map[max_idx]#(batch,2)
+    for img_id in range(batch_size):
+        tmp_img[img_id][light_idxes[img_id,1]-length//2:light_idxes[img_id,1]+length//2+1,light_idxes[img_id,0]-bold//2:light_idxes[img_id,0]+bold//2+1] = color#horizontal
+        tmp_img[img_id][light_idxes[img_id,1]-bold//2:light_idxes[img_id,1]+bold//2+1,light_idxes[img_id,0]-length//2:light_idxes[img_id,0]+length//2+1] = color#vertical
+        mask[img_id][light_idxes[img_id,1]-length//2:light_idxes[img_id,1]+length//2+1,light_idxes[img_id,0]-bold//2:light_idxes[img_id,0]+bold//2+1] = 1.0#horizontal
+        mask[img_id][light_idxes[img_id,1]-bold//2:light_idxes[img_id,1]+bold//2+1,light_idxes[img_id,0]-length//2:light_idxes[img_id,0]+length//2+1] = 1.0#horizontal
+    
+    if resize:
+        ratio = setup_config.full_face_size * 3 //setup_config.img_size[0]
+        tmp_img = np.expand_dims(np.expand_dims(tmp_img,axis=3),axis=2)#size=(img_num,originheight,1,originwidth,1,channel) at this moment
+        tmp_img = np.repeat(np.repeat(tmp_img,ratio,axis=2),ratio,axis=4)
+        tmp_img = np.reshape(tmp_img,[tmp_img.shape[0],setup_config.full_face_size*3,setup_config.full_face_size*4,tmp_img.shape[5]])
+
+        mask = np.expand_dims(np.expand_dims(mask,axis=3),axis=2)#size=(img_num,originheight,1,originwidth,1,channel) at this moment
+        mask = np.repeat(np.repeat(mask,ratio,axis=2),ratio,axis=4)
+        mask = np.reshape(mask,[mask.shape[0],setup_config.full_face_size*3,setup_config.full_face_size*4,mask.shape[5]])
+
+
+    lumi_img = np.where(mask > 0.0,tmp_img,lumi_img) 
+
+    if not is_batch_lumi:
+        lumi_img = np.squeeze(lumi_img,axis=0)
+    
+    return lumi_img
 
 class Setup_Config(object):
     
@@ -527,6 +592,7 @@ class Setup_Config(object):
         with open(self.config_dir+"visualize_config_torch.bin","rb") as pf:
             self.img_size = np.fromfile(pf,np.int32,2)
             self.visualize_map = np.fromfile(pf,np.int32).reshape([-1,2])
+            self.full_face_size = 64
     
     # def get_cam_pos_torch(self):
     #     try:
