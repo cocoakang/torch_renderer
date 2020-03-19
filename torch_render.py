@@ -346,9 +346,9 @@ def compute_wo_dot_n(setup,position,rotate_theta,n,new_cam_pos):
 
     return n_dot_views
 
-def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_name,
-    with_cos = True,pd_ps_wanted="both",rotate_point = True,specular_component="D_F_G_B",
-    global_custom_frame=None,use_custom_frame="",rotate_frame=True,new_cam_pos=None,use_new_cam_pos=False):
+def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_name,global_custom_frame=None,
+    use_custom_frame="",with_cos = True,pd_ps_wanted="both",rotate_point = True,specular_component="D_F_G_B",
+    rotate_frame=True,new_cam_pos=None,use_new_cam_pos=False):
     '''
     setup is Setup_Config class
     input_params = (rendering parameters) shape = [self.fitting_batch_size,self.parameter_len] i.e.[24576,10]

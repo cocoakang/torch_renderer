@@ -6,23 +6,26 @@ import multiprocessing as mp
 from torch.multiprocessing import Process, Queue, Semaphore
 
 class Rendering_Thread(Process):
-    def __init__(self,setup,process_id,rendering_configs,device,thread_ctr_map):
+    def __init__(self,setup,process_id,name,rendering_configs,device,thread_ctr_map,use_global_frame):
         Process.__init__(self)
-        print("[PROCESS {}]forked rendering process".format(process_id))
+        print("[RENDERING PROCESS {}]forked rendering process".format(process_id))
         self.setup = setup
         self.process_id = process_id
+        self.name = name
         self.rendering_configs = rendering_configs
         self.device = device
         self.need_rendering = False
         self.program_end = False
+        self.use_global_frame = use_global_frame
 
         self.thread_ctr_map = thread_ctr_map
         self.input_queue = self.thread_ctr_map["input_queue"]
         self.output_queue = self.thread_ctr_map["output_queue"]
         self.device_sph = self.thread_ctr_map["device_sph"]
+        self.data_transfer_mode = self.thread_ctr_map["data_transfer_mode"]
     
     def run(self):
-        print("[PROCESS {}] Starting".format(self.process_id))
+        print("[RENDERING PROCESS {}] Starting".format(self.process_id))
         while True:
             input_data = self.input_queue.get()
             # print("[PROCESS {}] Got rendering data".format(self.process_id))
@@ -32,28 +35,38 @@ class Rendering_Thread(Process):
             tmp_input_params = input_data[0].to(self.device,copy=True)
             tmp_input_positions = input_data[1].to(self.device,copy=True)
             tmp_rotate_theta = input_data[2].to(self.device,copy=True)
-
-            del input_data[0]
-            del input_data[0]
-            del input_data[0]
-            del input_data
-
+            tmp_shared_frame = [a.to(self.device,copy=True) for a in input_data[3]] if self.use_global_frame else None
+        
             #render here
             tmp_lumi,end_points = torch_render.draw_rendering_net(
                 self.setup,
                 tmp_input_params,
                 tmp_input_positions,
                 tmp_rotate_theta,
+                self.name,
+                tmp_shared_frame,
                 *self.rendering_configs
             )
-            # print("[PROCESS {}] Rendering done".format(self.process_id))
-            self.device_sph.release()
+        
+            if self.data_transfer_mode == 2:
+                end_points = {end_points[a_key].cpu() for a_key in end_points} 
+                tmp_lumi = tmp_lumi.cpu()
+
             self.output_queue.put([self.process_id,tmp_lumi,end_points]) 
-            del tmp_lumi
-            # print("[PROCESS {}] Return data done".format(self.process_id))
+            self.device_sph.release()
+
+            del input_data
 
 class Multiview_Renderer(nn.Module):
-    def __init__(self,args):
+    def __init__(self,args,data_transfer_mode=1,max_process_live_per_gpu=4):
+        '''
+        data_transfer_mode: 
+            0: all data are copied directly between GPUs. Memory leak may caused. Max rendering process num are bounded.
+            1: Sending data pass CPU memory. Memory leak may caused. Max rendering process num are bounded.
+            2: Both sending and returned data will pass CPU memory.  
+        max_process_live_per_gpu:
+            how many live process can run in one gpu
+        '''
         super(Multiview_Renderer,self).__init__()
     
         ########################################
@@ -61,32 +74,33 @@ class Multiview_Renderer(nn.Module):
         ########################################
         self.available_devices = args["available_devices"]
         self.available_devices_num = len(self.available_devices)
-        self.sample_view_num = args["sample_view_num"]
-        TORCH_RENDER_PATH = args["torch_render_path"]
-
-        #######################################
-        ## load rendering configs           ###
-        #######################################
-        standard_rendering_parameters = {
-            "config_dir":TORCH_RENDER_PATH+"wallet_of_torch_renderer/blackbox20_render_configs_1x1/"
-        }
-        self.setup = torch_render.Setup_Config(standard_rendering_parameters)
+        self.rendering_view_num = args["rendering_view_num"]
+        self.setup = args["setup"]
+        self.use_global_frame = args["use_global_frame"]
+        self.renderer_name_base = args["renderer_name_base"]
+        self.renderer_configs = args["renderer_configs"]#rotate point rotate normal etc.
+        
+        self.data_transfer_mode = data_transfer_mode
+        if self.data_transfer_mode == 0:
+            assert self.rendering_view_num < 7,"Data transfer mode:{}, sample view num should be less than 7, now:{}".format(self.data_transfer_mode,self.rendering_view_num)
+        elif self.data_transfer_mode == 1:
+            process_per_gpu = self.rendering_view_num//self.available_devices_num
+            assert process_per_gpu < 15,"Data transfer mode:{}, too many rendering process on same gpu, now:{}".format(self.data_transfer_mode,process_per_gpu)        
 
         #######################################
         ## construct renderer               ###
         #######################################
         self.device_sph_list = []
         for which_device in range(self.available_devices_num):
-            self.device_sph_list.append(Semaphore(4))
+            self.device_sph_list.append(Semaphore(max_process_live_per_gpu))
 
         self.renderer_list = []
         self.input_queue_list = []
-        self.output_queue = Queue(self.sample_view_num)
-        for which_renderer in range(self.sample_view_num):
-            print("[MAIN] create renderer:{}".format(which_renderer))
+        self.output_queue = Queue(self.rendering_view_num)
+        for which_renderer in range(self.rendering_view_num):
+            print("[MULTIVIEW RENDERER] create renderer:{}".format(which_renderer))
             tmp_input_queue = Queue()
             self.input_queue_list.append(tmp_input_queue)
-
             
             cur_device_id = which_renderer%self.available_devices_num
             cur_device = self.available_devices[cur_device_id]
@@ -95,22 +109,33 @@ class Multiview_Renderer(nn.Module):
             thread_ctr_map = {
                 "input_queue":tmp_input_queue,
                 "output_queue":self.output_queue,
-                "device_sph":cur_semaphore
+                "device_sph":cur_semaphore,
+                "data_transfer_mode":self.data_transfer_mode
             }
 
 
-            tmp_renderer = Rendering_Thread(self.setup,which_renderer,["render_{}".format(which_renderer)],cur_device,thread_ctr_map)
+            tmp_renderer = Rendering_Thread(
+                self.setup,
+                which_renderer,
+                self.renderer_name_base+"_{}".format(which_renderer),
+                self.renderer_configs,
+                cur_device,
+                thread_ctr_map,
+                self.use_global_frame
+            )
             tmp_renderer.daemon = True
             tmp_renderer.start()
-            # print("PID:",tmp_renderer.pid)
-            # time.sleep(2.0)
+            
             self.renderer_list.append(tmp_renderer)
         
 
-    def forward(self,input_params,input_positions):
+    def forward(self,input_params,input_positions,rotate_theta_list):
         '''
-        input_params=(batch_size,7 or 11) torch tensor
-        input_positions=(batch_size,3) torch tensor
+        input_params=(batch_size,7 or 11) torch tensor TODO:it can be a list
+        input_positions=(batch_size,3) torch tensor TODO:it can be a list
+        rotate_theta_list=list of (batch_size,1) item num :rendering_view_num torch tensor
+
+        return = (batch, rendering_view_num, lightnum, channel_num)
         '''
         
         ############################################################################################################################
@@ -124,33 +149,31 @@ class Multiview_Renderer(nn.Module):
         channel_num = 3 if all_param_dim == 11 else 1
         ############################################################################################################################
         ##step 2 rendering
-        ############################################################################################################################
-        rotate_theta_zero = torch.zeros(batch_size,1)
-        
-        input_params = input_params.to("cpu")
-        input_positions = input_positions.to("cpu")
-        rotate_theta_zero = rotate_theta_zero.to("cpu")
+        ############################################################################################################################        
+        input_params = input_params.to("cpu",copy=True)
+        input_positions = input_positions.to("cpu",copy=True)
 
-        for idx in range(self.sample_view_num):
-            # print("[MAIN] put data to queue:{}".format(idx))
-            self.input_queue_list[idx].put([input_params.detach(),input_positions.detach(),rotate_theta_zero.detach()])
-            # time.sleep(3.0)
+        for which_view in range(self.rendering_view_num):
+            tmp_rotate_theta = rotate_theta_list[which_view].to("cpu",copy=True)
+            self.input_queue_list[which_view].put([input_params,input_positions,tmp_rotate_theta])
+            
         del input_params
         del input_positions
-        del rotate_theta_zero
+        del tmp_rotate_theta
         
-        result_tensor = torch.empty(self.sample_view_num,batch_size,self.setup.get_light_num(),channel_num,device=origin_device)#(sample_view_num,batchsize,lumilen,channel_num)
-        
-        for view_id in range(self.sample_view_num):
+        ############################################################################################################################
+        ##step 3 grab_all_rendered_result
+        ############################################################################################################################
+        result_tensor = torch.empty(self.rendering_view_num,batch_size,self.setup.get_light_num(),channel_num,device=origin_device)#(rendering_view_num,batchsize,lumilen,channel_num)
+        #TODO maybe we don't need to transfer tensor back
+
+        for view_id in range(self.rendering_view_num):
             tmp_result = self.output_queue.get()
-            result_tensor[tmp_result[0]] = tmp_result[1].to(origin_device,copy=True)
+            result_tensor[tmp_result[0]] = tmp_result[1].to(origin_device,copy=True)#TODO deal with end_points
             del tmp_result[0]
             del tmp_result[0]
             del tmp_result
 
-        ############################################################################################################################
-        ##step 3 grab_all_rendered_result
-        ############################################################################################################################
-        result_tensor = result_tensor.permute(1,0,2,3)
+        result_tensor = result_tensor.permute(1,0,2,3)#(batchsize,rendering_view_num,lumilen,channel_num)
         
         return result_tensor
