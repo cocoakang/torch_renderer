@@ -129,11 +129,11 @@ class Multiview_Renderer(nn.Module):
             self.renderer_list.append(tmp_renderer)
         
 
-    def forward(self,input_params,input_positions,rotate_theta_list):
+    def forward(self,input_params,input_positions,rotate_theta):
         '''
         input_params=(batch_size,7 or 11) torch tensor TODO:it can be a list
         input_positions=(batch_size,3) torch tensor TODO:it can be a list
-        rotate_theta_list=list of (batch_size,1) item num :rendering_view_num torch tensor
+        rotate_theta=(batch_size,rendering_view_num) torch tensor
 
         return = (batch, rendering_view_num, lightnum, channel_num)
         '''
@@ -154,7 +154,7 @@ class Multiview_Renderer(nn.Module):
         input_positions = input_positions.to("cpu",copy=True)
 
         for which_view in range(self.rendering_view_num):
-            tmp_rotate_theta = rotate_theta_list[which_view].to("cpu",copy=True)
+            tmp_rotate_theta = rotate_theta[:,[which_view]].to("cpu",copy=True)
             self.input_queue_list[which_view].put([input_params,input_positions,tmp_rotate_theta])
             
         del input_params
