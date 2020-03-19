@@ -1,14 +1,52 @@
+import os
+import time
 import torch
-import numpy as np
+import torch.multiprocessing as mp
+import psutil
 
-data = np.random.rand(5,3)
+class Consumer(mp.Process):
 
-idxes = np.argmax(data,axis=1)
-# print(data)
-print(idxes)
+    def __init__(self, queue):
+        super(Consumer, self).__init__()
+        self.queue = queue       
+        self.device = torch.device("cuda:1")
 
-visulaize_idxes = np.arange(20).reshape([-1,2])
-print(visulaize_idxes)
 
-selected_idxes = visulaize_idxes[idxes]
-print(selected_idxes)
+    def run(self):
+        print('Consumer: ', os.getpid())
+        while True:        
+            tensor = self.queue.get()
+            copied_tensor = tensor.to(self.device,copy=True)
+            del tensor
+
+            process = psutil.Process()
+            print('Consumer mem: ', process.memory_info().rss, end='\r')
+
+class Producer(mp.Process):
+
+    def __init__(self, queue):
+        super(Producer, self).__init__()
+        self.queue = queue
+        self.device = torch.device('cpu')        
+
+    def run(self):
+        print('Producer: ', os.getpid())
+        while True:        
+            tensor = torch.ones([2, 4], dtype=torch.float32, device=self.device)
+            self.queue.put(tensor)
+            time.sleep(0.001)
+
+
+if __name__ == '__main__':
+    print(mp.get_all_sharing_strategies())
+
+    queue = mp.Queue()
+
+    consumer = Consumer(queue)
+    producer = Producer(queue)
+
+    consumer.start()
+    producer.start()    
+
+    consumer.join()
+    producer.join()

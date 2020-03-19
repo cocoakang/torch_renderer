@@ -594,6 +594,9 @@ class Setup_Config(object):
             self.visualize_map = np.fromfile(pf,np.int32).reshape([-1,2])
             self.full_face_size = 64
     
+    def get_light_num(self):
+        return self.light_poses.shape[0]
+
     # def get_cam_pos_torch(self):
     #     try:
     #         return self.cam_pos_torch

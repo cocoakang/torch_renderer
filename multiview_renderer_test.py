@@ -1,7 +1,8 @@
 import numpy as np
 import torch
-# from multiview_renderer import Multiview_Renderer
-from multiview_renderer_naive import Multiview_Renderer
+from multiview_renderer_mp import Multiview_Renderer
+# from multiview_renderer_mt import Multiview_Renderer
+# from multiview_renderer_naive import Multiview_Renderer
 import time
 
 if __name__ == "__main__":
@@ -28,5 +29,8 @@ if __name__ == "__main__":
         if itr == 10:
             start = time.time()
         renderer(tmp_params,tmp_positions)
+        # print("waiting for next itr...")
+        # time.sleep(10.0)
+        # print("wait done.")
     end = time.time()
     print(end - start)
