@@ -133,7 +133,7 @@ class Multiview_Renderer(nn.Module):
         assert view_id <= self.rendering_view_num,"multiview renderer only rendering {} views:".format(self.rendering_view_num)
         return self.renderer_list[view_id].device
 
-    def forward(self,input_params,input_positions,rotate_theta,global_frame = None,return_tensor = False):
+    def forward(self,input_params,input_positions,rotate_theta,global_frame = None,return_tensor = False,end_points_wanted_list=[]):
         '''
         input_params=(batch_size,7 or 11) torch tensor TODO:it can be a list
         input_positions=(batch_size,3) torch tensor TODO:it can be a list
@@ -144,6 +144,10 @@ class Multiview_Renderer(nn.Module):
                 (batch, rendering_view_num, lightnum, channel_num)
             else:
                 list of (batch,lightnum,channel_num) each of them on the specific gpu
+        if not return_tensor:
+            returned tensor will be placed on where input_params is
+        else
+            item of returned tensor list will be placed on where it rendered
         '''
         
         ############################################################################################################################
@@ -178,27 +182,22 @@ class Multiview_Renderer(nn.Module):
         ##step 3 grab_all_rendered_result
         ############################################################################################################################
 
+        result_tensor = torch.empty(self.rendering_view_num,batch_size,self.setup.get_light_num(),channel_num,device=origin_device) if return_tensor else [None]*self.rendering_view_num
+        result_end_points_list = [None]*self.rendering_view_num
+        '''
+        return_tensor shape: 
+            list of#(batchsize,lumilen,channel_num) or
+            #(rendering_view_num,batchsize,lumilen,channel_num)
+        '''
+
+        for view_id in range(self.rendering_view_num):
+            tmp_result = self.output_queue.get()
+            result_tensor[tmp_result[0]] = tmp_result[1].to(origin_device,copy=True) if return_tensor else tmp_result[1].clone()
+            result_end_points_list[view_id] = {a_key : tmp_result[2][a_key] for a_key in end_points_wanted_list}
+        
+            del tmp_result
+
         if return_tensor:
-            result_tensor = torch.empty(self.rendering_view_num,batch_size,self.setup.get_light_num(),channel_num,device=origin_device)#(rendering_view_num,batchsize,lumilen,channel_num)
-            #TODO maybe we don't need to transfer tensor back
-
-            for view_id in range(self.rendering_view_num):
-                tmp_result = self.output_queue.get()
-                result_tensor[tmp_result[0]] = tmp_result[1].to(origin_device,copy=True)#TODO deal with end_points
-                del tmp_result[0]
-                del tmp_result[0]
-                del tmp_result
-
             result_tensor = result_tensor.permute(1,0,2,3)#(batchsize,rendering_view_num,lumilen,channel_num)
         
-        else:
-            result_tensor = [None]*self.rendering_view_num#(batchsize,lumilen,channel_num)
-
-            for view_id in range(self.rendering_view_num):
-                tmp_result = self.output_queue.get()
-                result_tensor[tmp_result[0]] = tmp_result[1].clone()#TODO deal with end_points
-                del tmp_result[0]
-                del tmp_result[0]
-                del tmp_result
-
-        return result_tensor
+        return result_tensor,result_end_points_list
