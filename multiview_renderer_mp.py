@@ -32,6 +32,7 @@ class Rendering_Thread(Process):
             self.device_sph.acquire()
             # print("[PROCESS {}] Got device".format(self.process_id))
             #data to worker's device
+            # print(len(input_data))
             tmp_input_params = input_data[0].to(self.device,copy=True)
             tmp_input_positions = input_data[1].to(self.device,copy=True)
             tmp_rotate_theta = input_data[2].to(self.device,copy=True)
@@ -76,7 +77,7 @@ class Multiview_Renderer(nn.Module):
         self.available_devices_num = len(self.available_devices)
         self.rendering_view_num = args["rendering_view_num"]
         self.setup = args["setup"]
-        self.use_global_frame = args["use_global_frame"]
+        self.use_global_frame = True if (len(args["renderer_configs"]) > 0) else 0
         self.renderer_name_base = args["renderer_name_base"]
         self.renderer_configs = args["renderer_configs"]#rotate point rotate normal etc.
         
@@ -127,15 +128,22 @@ class Multiview_Renderer(nn.Module):
             tmp_renderer.start()
             
             self.renderer_list.append(tmp_renderer)
-        
+    
+    def get_rendering_device_at_view(self,view_id):
+        assert view_id <= self.rendering_view_num,"multiview renderer only rendering {} views:".format(self.rendering_view_num)
+        return self.renderer_list[view_id].device
 
-    def forward(self,input_params,input_positions,rotate_theta):
+    def forward(self,input_params,input_positions,rotate_theta,global_frame = None,return_tensor = False):
         '''
         input_params=(batch_size,7 or 11) torch tensor TODO:it can be a list
         input_positions=(batch_size,3) torch tensor TODO:it can be a list
         rotate_theta=(batch_size,rendering_view_num) torch tensor
 
-        return = (batch, rendering_view_num, lightnum, channel_num)
+        return = 
+            if return_tensor = True:
+                (batch, rendering_view_num, lightnum, channel_num)
+            else:
+                list of (batch,lightnum,channel_num) each of them on the specific gpu
         '''
         
         ############################################################################################################################
@@ -155,7 +163,12 @@ class Multiview_Renderer(nn.Module):
 
         for which_view in range(self.rendering_view_num):
             tmp_rotate_theta = rotate_theta[:,[which_view]].to("cpu",copy=True)
-            self.input_queue_list[which_view].put([input_params,input_positions,tmp_rotate_theta])
+            # print("view:{} if_use_global_frame:{}".format(which_view,self.use_global_frame))
+            if self.use_global_frame:
+                tmp_global_frame = [an_item.to("cpu",copy=True) for an_item in global_frame]
+                self.input_queue_list[which_view].put([input_params,input_positions,tmp_rotate_theta,tmp_global_frame])
+            else:
+                self.input_queue_list[which_view].put([input_params,input_positions,tmp_rotate_theta])
             
         del input_params
         del input_positions
@@ -164,16 +177,28 @@ class Multiview_Renderer(nn.Module):
         ############################################################################################################################
         ##step 3 grab_all_rendered_result
         ############################################################################################################################
-        result_tensor = torch.empty(self.rendering_view_num,batch_size,self.setup.get_light_num(),channel_num,device=origin_device)#(rendering_view_num,batchsize,lumilen,channel_num)
-        #TODO maybe we don't need to transfer tensor back
 
-        for view_id in range(self.rendering_view_num):
-            tmp_result = self.output_queue.get()
-            result_tensor[tmp_result[0]] = tmp_result[1].to(origin_device,copy=True)#TODO deal with end_points
-            del tmp_result[0]
-            del tmp_result[0]
-            del tmp_result
+        if return_tensor:
+            result_tensor = torch.empty(self.rendering_view_num,batch_size,self.setup.get_light_num(),channel_num,device=origin_device)#(rendering_view_num,batchsize,lumilen,channel_num)
+            #TODO maybe we don't need to transfer tensor back
 
-        result_tensor = result_tensor.permute(1,0,2,3)#(batchsize,rendering_view_num,lumilen,channel_num)
+            for view_id in range(self.rendering_view_num):
+                tmp_result = self.output_queue.get()
+                result_tensor[tmp_result[0]] = tmp_result[1].to(origin_device,copy=True)#TODO deal with end_points
+                del tmp_result[0]
+                del tmp_result[0]
+                del tmp_result
+
+            result_tensor = result_tensor.permute(1,0,2,3)#(batchsize,rendering_view_num,lumilen,channel_num)
         
+        else:
+            result_tensor = [None]*self.rendering_view_num#(batchsize,lumilen,channel_num)
+
+            for view_id in range(self.rendering_view_num):
+                tmp_result = self.output_queue.get()
+                result_tensor[tmp_result[0]] = tmp_result[1].clone()#TODO deal with end_points
+                del tmp_result[0]
+                del tmp_result[0]
+                del tmp_result
+
         return result_tensor
