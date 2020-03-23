@@ -59,7 +59,7 @@ class Rendering_Thread(Process):
             del input_data
 
 class Multiview_Renderer(nn.Module):
-    def __init__(self,args,data_transfer_mode=1,max_process_live_per_gpu=4):
+    def __init__(self,args,data_transfer_mode=1,max_process_live_per_gpu=7):
         '''
         data_transfer_mode: 
             0: all data are copied directly between GPUs. Memory leak may caused. Max rendering process num are bounded.
@@ -77,7 +77,7 @@ class Multiview_Renderer(nn.Module):
         self.available_devices_num = len(self.available_devices)
         self.rendering_view_num = args["rendering_view_num"]
         self.setup = args["setup"]
-        self.use_global_frame = True if (len(args["renderer_configs"]) > 0) else 0
+        self.use_global_frame = True if (len(args["renderer_configs"]) > 0) else False
         self.renderer_name_base = args["renderer_name_base"]
         self.renderer_configs = args["renderer_configs"]#rotate point rotate normal etc.
         
