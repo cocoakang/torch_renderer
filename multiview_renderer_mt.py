@@ -63,6 +63,7 @@ class Multiview_Renderer(nn.Module):
         self.use_global_frame = True if (len(args["renderer_configs"]) > 0) else False
         self.renderer_name_base = args["renderer_name_base"]
         self.renderer_configs = args["renderer_configs"]#rotate point rotate normal etc.
+        self.input_as_list = args["input_as_list"]
 
         #######################################
         ## construct renderer               ###
@@ -110,9 +111,10 @@ class Multiview_Renderer(nn.Module):
 
     def forward(self,input_params,input_positions,rotate_theta,global_frame = None,return_tensor = False,end_points_wanted_list=[]):
         '''
-        input_params=(batch_size,7 or 11) torch tensor TODO:it can be a list
-        input_positions=(batch_size,3) torch tensor TODO:it can be a list
-        rotate_theta=(batch_size,rendering_view_num) torch tensor
+        input_params=(batch_size,7 or 11) torch tensor maybe a list if self.input_as_list 
+        input_positions=(batch_size,3) torch tensor maybe a list if self.input_as_list
+        rotate_theta=(batch_size,rendering_view_num)
+        global_frame=[(batch_size,3),(batch_size,3),(batch_size,3)] torch tensor maybe a list if self.input_as_list
 
         return = 
             if return_tensor = True:
@@ -128,10 +130,16 @@ class Multiview_Renderer(nn.Module):
         ############################################################################################################################
         ##step 0 unpack batch data
         ############################################################################################################################
-        batch_size = input_params.size()[0]
-        origin_device = input_params.device
-        assert input_positions.size()[0] == batch_size,"input_params shape:{} input_positions shape:{}".format(input_params.size(),input_positions.size())
-        all_param_dim = input_params.size()[1]
+        if self.input_as_list:
+            batch_size = input_params[0].size()[0]
+            origin_device = input_params[0].device
+            all_param_dim = input_params[0].size()[1]
+        else:
+            batch_size = input_params.size()[0]
+            origin_device = input_params.device
+            assert input_positions.size()[0] == batch_size,"input_params shape:{} input_positions shape:{}".format(input_params.size(),input_positions.size())
+            all_param_dim = input_params.size()[1]
+        
         assert all_param_dim == 11 or all_param_dim == 7,"input param dim should be 11 or 7 now:{}".format(all_param_dim)
         channel_num = 3 if all_param_dim == 11 else 1
         
@@ -140,11 +148,13 @@ class Multiview_Renderer(nn.Module):
         ############################################################################################################################
         for which_view in range(self.rendering_view_num):
             tmp_rotate_theta = rotate_theta[:,[which_view]]
+            tmp_input_params = input_params[which_view].clone() if self.input_as_list else input_params.clone()
+            tmp_input_positions = input_positions[which_view].clone() if self.input_as_list else input_positions.clone()
             if self.use_global_frame:
-                tmp_global_frame = [an_item.clone() for an_item in global_frame]
-                self.input_holder[which_view] = [input_params.clone(),input_positions.clone(),tmp_rotate_theta.clone(),tmp_global_frame]
+                tmp_global_frame = [an_item.clone() for an_item in global_frame[which_view]] if self.input_as_list else [an_item.clone() for an_item in global_frame]
+                self.input_holder[which_view] = [tmp_input_params,tmp_input_positions,tmp_rotate_theta.clone(),tmp_global_frame]
             else:
-                self.input_holder[which_view] = [input_params.clone(),input_positions.clone(),tmp_rotate_theta.clone()]
+                self.input_holder[which_view] = [tmp_input_params,tmp_input_positions,tmp_rotate_theta.clone()]
                 
             self.input_sph_list[which_view].release()
 
