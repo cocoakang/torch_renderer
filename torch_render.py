@@ -310,6 +310,28 @@ def calc_light_brdf(wi_local,wo_local,ax,ay,pd,ps,pd_ps_wanted,specular_componen
         return b*ps
     # return b*ps# return a+b*ps
 
+def rotate_vector_along_axis(setup,rotate_theta,vector,is_list_input=False):
+    batch_size = vector[0].size()[0] if is_list_input else vector.size()[0] 
+    device = vector[0].device if is_list_input else vector.device
+    view_mat_model = rotation_axis(rotate_theta,setup.get_rot_axis_torch(device))#[batch,4,4]
+    view_mat_for_normal =torch.transpose(torch.inverse(view_mat_model),1,2)
+    view_mat_for_normal_t = torch.transpose(view_mat_for_normal,1,2)
+
+    if is_list_input:
+        result_list = []
+        static_tmp_ones = torch.ones(batch_size,1,dtype=vector[0].dtype,device=device)
+        for a_vector in vector:
+            pn = torch.unsqueeze(torch.cat([a_vector,static_tmp_ones],dim=1),1)#[batch,1,4]
+            a_vector = torch.squeeze(torch.matmul(pn,view_mat_for_normal_t),1)[:,:3]
+            result_list.append(a_vector)
+        return result_list
+    else:
+        pn = torch.unsqueeze(torch.cat([vector,torch.ones(batch_size,1,dtype=vector.dtype,device=device)],dim=1),1)#[batch,1,4]
+        
+        vector = torch.squeeze(torch.matmul(pn,view_mat_for_normal_t),1)[:,:3]
+        return vector
+    
+
 def compute_wo_dot_n(setup,position,rotate_theta,n,new_cam_pos):
     '''
     This is a bare function which means it doen't use any data of this class!
