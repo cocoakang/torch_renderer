@@ -347,6 +347,7 @@ def rotate_point_along_axis(setup,rotate_theta,points,is_list_input=False):
             result_list.append(position)
         return result_list
     else:
+        static_tmp_ones = torch.ones(batch_size,1,dtype=vector[0].dtype,device=device)
         position = torch.unsqueeze(torch.cat([points,static_tmp_ones],dim=1),1)#[batch,1,4]#tf.expand_dims(tf.concat([position,tf.ones([position.shape[0],1],tf.float32)],axis=1),axis=1)
         position = torch.squeeze(torch.matmul(position,view_mat_model_t),1)[:,:3]#position@view_mat_model_t#shape=[batch,3]
             
