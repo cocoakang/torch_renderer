@@ -204,6 +204,19 @@ def compute_form_factors(position,n,light_poses,light_normals,end_points,with_co
     # self.endPoints[variable_scope_name+"cos2"] = a
     return a/(b+1e-6)*c
 
+def compute_form_factor_bc(position,light_poses,light_normals):
+    '''
+    position = (batchsize,3)
+    light_poses = (lightnum,3)
+    '''
+    ldir = torch.unsqueeze(light_poses,dim=0)-torch.unsqueeze(position,dim=1)#[batch,lightnum,3]
+    dist = torch.sqrt(torch.sum(ldir**2,dim=2,keepdim=True))#[batch,lightnum,1]
+    ldir = torch.nn.functional.normalize(ldir,dim=2)#[batch,lightnum,3]
+    b = dist*dist#[batch,lightnum,1]
+    c = torch.max(torch.sum(ldir*torch.unsqueeze(light_normals,dim=0),dim=2,keepdim=True),torch.zeros(1,device=position.device))#[batch,lightnum,1]
+
+    return c/(b+1e-6)
+
 def ggx_G1_aniso_honntai(v,vz,ax,ay):
     axayaz = torch.cat([ax,ay,torch.ones_like(ax)],dim=1)#[batch,3]
     vv = v*torch.unsqueeze(axayaz,dim=1)#[batch,lightnum,3]
