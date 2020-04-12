@@ -628,7 +628,7 @@ def draw_vector_on_lumi(lumi_img,vector_to_draw,positions,setup_config,is_batch_
 
 def rotate_rowwise(matrix,shifts):
     '''
-    matrix = (m,n,d) or (m,n) torch_tensor
+    matrix = (m,n,d) or (m,n) torch_tensor (I think higher dimension is ok, but to be tested. If you find it goes well, please notify me :))
 
     shifts = (m,) torch_tensor
     
