@@ -626,6 +626,42 @@ def draw_vector_on_lumi(lumi_img,vector_to_draw,positions,setup_config,is_batch_
     
     return lumi_img
 
+def rotate_rowwise(matrix,shifts):
+    '''
+    matrix = (m,n,d) or (m,n) torch_tensor
+    shifts = (m) torch_tensor
+    shift to left for example:
+    matrix:
+    [[0.74728148 0.76232882 0.91310868 0.86849492]
+    [0.36226688 0.3736157  0.37672    0.1656204 ]
+    [0.0099235  0.24112559 0.37998685 0.44215475]
+    [0.37583682 0.08553133 0.82055228 0.58087278]
+    [0.56478736 0.64550805 0.13207896 0.06440142]]
+    shifts:
+    [0 1 1 0 2]
+    return:
+    [[0.74728148 0.76232882 0.91310868 0.86849492]
+    [0.3736157  0.37672    0.1656204  0.36226688]
+    [0.24112559 0.37998685 0.44215475 0.0099235 ]
+    [0.37583682 0.08553133 0.82055228 0.58087278]
+    [0.13207896 0.06440142 0.56478736 0.64550805]]
+    '''
+    # get shape of the input matrix
+    shape = matrix.size()
+
+    # compute and stack the meshgrid to get the index matrix of shape (m,n,2)
+    ind = torch.stack(torch.meshgrid(torch.arange(shape[0],device=shifts.device,dtype=shifts.dtype),torch.arange(shape[1],device=shifts.device,dtype=shifts.dtype))).permute(1,2,0)
+    
+    # add the value from shifts to the corresponding row and devide modulo shape[1]
+    # this will effectively introduce the desired shift, but at the level of indices
+    shifted_ind = torch.fmod(((ind[:,:,1]).permute(1,0) + shifts).permute(1,0),shape[1])
+    
+    # convert the shifted indices to the right shape
+    new_ind = torch.stack([ind[:,:,0],shifted_ind],dim=2).long()
+    
+    # return the resliced tensor
+    return matrix[new_ind[:,:,0],new_ind[:,:,1]]
+
 class Setup_Config(object):
     
     def __init__(self,args):
