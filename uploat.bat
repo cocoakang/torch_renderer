@@ -1,1 +1,1 @@
-scp *.py cocoa_kang@10.76.5.215:/home/cocoa_kang/training_tasks/current_work/newborn_torch/torch_renderer/
+scp *.py cocoa_kang@10.76.2.219:/home/cocoa_kang/training_tasks/current_work/newborn_torch/torch_renderer/

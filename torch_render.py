@@ -690,6 +690,18 @@ class Setup_Config(object):
             self.img_size = np.fromfile(pf,np.int32,2)
             self.visualize_map = np.fromfile(pf,np.int32).reshape([-1,2])
             self.full_face_size = 64
+        
+        try:
+            self.color_tensor = np.fromfile(config_file_dir+"color_tensor_cube_LBC.bin",np.float32).reshape([3,3,3])
+        except FileNotFoundError  as identifier:
+            print("Color tensor doesn't exist, using Identity Tensor")
+            self.color_tensor = np.zeros([3,3,3],np.float32)
+            for i in range(3):
+                self.color_tensor[i][i][i] = 1.0
+    
+    def get_color_tensor(self,custom_device):
+        return torch.from_numpy(self.color_tensor).to(custom_device)
+
     
     def get_light_num(self):
         return self.light_poses.shape[0]
