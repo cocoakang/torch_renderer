@@ -603,10 +603,10 @@ def draw_vector_on_lumi(lumi_img,vector_to_draw,positions,setup_config,is_batch_
     mask = np.zeros_like(tmp_img)
     light_idxes = setup_config.visualize_map[max_idx]#(batch,2)
     for img_id in range(batch_size):
-        tmp_img[img_id][light_idxes[img_id,1]-length//2:light_idxes[img_id,1]+length//2+1,light_idxes[img_id,0]-bold//2:light_idxes[img_id,0]+bold//2+1] = color#horizontal
-        tmp_img[img_id][light_idxes[img_id,1]-bold//2:light_idxes[img_id,1]+bold//2+1,light_idxes[img_id,0]-length//2:light_idxes[img_id,0]+length//2+1] = color#vertical
-        mask[img_id][light_idxes[img_id,1]-length//2:light_idxes[img_id,1]+length//2+1,light_idxes[img_id,0]-bold//2:light_idxes[img_id,0]+bold//2+1] = 1.0#horizontal
-        mask[img_id][light_idxes[img_id,1]-bold//2:light_idxes[img_id,1]+bold//2+1,light_idxes[img_id,0]-length//2:light_idxes[img_id,0]+length//2+1] = 1.0#horizontal
+        tmp_img[img_id][max(0,light_idxes[img_id,1]-length//2):light_idxes[img_id,1]+length//2+1,max(0,light_idxes[img_id,0]-bold//2):light_idxes[img_id,0]+bold//2+1] = color#horizontal
+        tmp_img[img_id][max(0,light_idxes[img_id,1]-bold//2):light_idxes[img_id,1]+bold//2+1,max(0,light_idxes[img_id,0]-length//2):light_idxes[img_id,0]+length//2+1] = color#vertical
+        mask[img_id][max(0,light_idxes[img_id,1]-length//2):light_idxes[img_id,1]+length//2+1,max(0,light_idxes[img_id,0]-bold//2):light_idxes[img_id,0]+bold//2+1] = 1.0#horizontal
+        mask[img_id][max(0,light_idxes[img_id,1]-bold//2):light_idxes[img_id,1]+bold//2+1,max(0,light_idxes[img_id,0]-length//2):light_idxes[img_id,0]+length//2+1] = 1.0#horizontal
     
     if resize:
         ratio = setup_config.full_face_size * 3 //setup_config.img_size[0]
