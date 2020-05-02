@@ -436,8 +436,6 @@ def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_n
     view_mat_for_normal =torch.transpose(torch.inverse(view_mat_model),1,2)#[batch,4,4]
     view_mat_for_normal_t = torch.transpose(view_mat_for_normal,1,2)#[batch,4,4]
 
-    test_node = torch.cat([view_mat_model,view_mat_model_t,view_mat_for_normal,view_mat_for_normal_t],dim=0)
-
     ###[STEP 1] define frame
     view_dir = cam_pos - position #shape=[batch,3]
     view_dir = torch.nn.functional.normalize(view_dir,dim=1)#shape=[batch,3]
