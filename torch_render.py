@@ -323,12 +323,13 @@ def calc_light_brdf(wi_local,wo_local,ax,ay,pd,ps,pd_ps_wanted,specular_componen
         return b*ps
     # return b*ps# return a+b*ps
 
-def rotate_vector_along_axis(setup,rotate_theta,vector,is_list_input=False):
+def rotate_vector_along_axis(setup,rotate_theta,vector,is_list_input=False,view_mat_for_normal_t=None):
     batch_size = vector[0].size()[0] if is_list_input else vector.size()[0] 
     device = vector[0].device if is_list_input else vector.device
-    view_mat_model = rotation_axis(rotate_theta,setup.get_rot_axis_torch(device))#[batch,4,4]
-    view_mat_for_normal =torch.transpose(torch.inverse(view_mat_model),1,2)
-    view_mat_for_normal_t = torch.transpose(view_mat_for_normal,1,2)
+    if view_mat_for_normal_t is None:
+        view_mat_model = rotation_axis(rotate_theta,setup.get_rot_axis_torch(device))#[batch,4,4]
+        view_mat_for_normal =torch.transpose(torch.inverse(view_mat_model),1,2)
+        view_mat_for_normal_t = torch.transpose(view_mat_for_normal,1,2)
 
     if is_list_input:
         result_list = []
