@@ -744,3 +744,20 @@ class Setup_Config(object):
     
     def get_rot_axis_torch(self,custom_device):
         return torch.from_numpy(self.rot_axis).to(custom_device)
+    
+    def get_sub_light_pos(self,mask):
+        '''
+        mask (192,256) ndarray
+        return:
+            sub_light_pos (wanted_lightnum,3) ndarray
+            sub_light_normals (wanted_lightnum,3) ndarray
+        '''
+        idx = np.where(mask >= 0)
+        sub_light_num = idx[0].shape[0]
+        sub_light_pos = np.zeros((sub_light_num,3),np.float32)
+        sub_light_normals = np.zeros((sub_light_num,3),np.float32)
+        for which_light in range(sub_light_num):
+            idx_lightstage = np.where((self.visualize_map == [idx[1][which_light],idx[0][which_light]]).all(axis=1))[0][0]
+            sub_light_pos[mask[idx[0][which_light],idx[1][which_light]]] = self.light_poses[idx_lightstage]
+            sub_light_normals[mask[idx[0][which_light],idx[1][which_light]]] = self.light_normals[idx_lightstage]
+        return sub_light_pos,sub_light_normals
