@@ -1,6 +1,8 @@
 import torch
 import math
+import cv2
 import numpy as np
+import scipy.io as scio
 
 def hemi_octa_map(dir):
     '''
@@ -551,10 +553,10 @@ def visualize_lumi(lumi,setup_config,is_batch_lumi=True,resize=True):
     if tmp_img.shape[3] == 1:
         tmp_img = np.repeat(tmp_img,3,axis=3)
     if resize:
-        ratio = setup_config.full_face_size * 3 //setup_config.img_size[0]
+        ratio = setup_config.full_img_size[0] //setup_config.img_size[0]
         tmp_img = np.expand_dims(np.expand_dims(tmp_img,axis=3),axis=2)#size=(img_num,originheight,1,originwidth,1,channel) at this moment
         tmp_img = np.repeat(np.repeat(tmp_img,ratio,axis=2),ratio,axis=4)
-        tmp_img = np.reshape(tmp_img,[tmp_img.shape[0],setup_config.full_face_size*3,setup_config.full_face_size*4,tmp_img.shape[5]])
+        tmp_img = np.reshape(tmp_img,[tmp_img.shape[0],setup_config.full_img_size[0],setup_config.full_img_size[1],tmp_img.shape[5]])
 
     if not is_batch_lumi:
         tmp_img = np.squeeze(tmp_img,axis=0)
@@ -688,7 +690,6 @@ class Setup_Config(object):
         with open(self.config_dir+"visualize_config_torch.bin","rb") as pf:
             self.img_size = np.fromfile(pf,np.int32,2)
             self.visualize_map = np.fromfile(pf,np.int32).reshape([-1,2])
-            self.full_face_size = 64
         
         try:
             self.color_tensor = np.fromfile(config_file_dir+"color_tensor_cube_LBC.bin",np.float32).reshape([3,3,3])
@@ -761,3 +762,105 @@ class Setup_Config(object):
             sub_light_pos[mask[idx[0][which_light],idx[1][which_light]]] = self.light_poses[idx_lightstage]
             sub_light_normals[mask[idx[0][which_light],idx[1][which_light]]] = self.light_normals[idx_lightstage]
         return sub_light_pos,sub_light_normals
+
+class Setup_Config_Freeform(Setup_Config):
+    def __init__(self, args):
+        super().__init__(args)
+
+class Setup_Config_Structured(Setup_Config):
+    def __init__(self, args):
+        super().__init__(args)
+    
+    def get_all_rts(self,custom_device):
+        assert len(self.available_rts) > 0,"no availble predefined rts in this setup!"
+        tmp_list = []
+        for R_matrix,T_vec in self.available_rts:
+            R_matrix = torch.from_numpy(R_matrix.astype(np.float32)).to(custom_device)
+            T_vec = torch.from_numpy(T_vec.astype(np.float32)).to(custom_device)
+            tmp_list.append((R_matrix,T_vec))
+        return tmp_list
+
+class Setup_Config_Freeform_Diligent(Setup_Config_Freeform):
+    def __init__(self, args):
+        super().__init__(args)
+        self.full_img_size = self.img_size*3
+
+class Setup_Config_Freeform_Lightstage(Setup_Config_Freeform):
+    def __init__(self, args):
+        super().__init__(args)
+        self.full_img_size = np.array((64*3,64*4),np.int32)
+
+class Setup_Config_Structured_Diligent(Setup_Config_Structured):
+    def __init__(self, args):
+        super().__init__(args)
+
+        self.full_img_size = self.img_size*3
+
+        self.available_rts = []
+        try:
+            calib_data = scio.loadmat(self.config_dir+"Calib_Results.mat")
+            view_num = (len(calib_data.keys())-1-3)//2
+            for which_view in range(view_num):
+                R_matrix = calib_data["Rc_{}".format(which_view+1)]
+                T_vec = calib_data["Tc_{}".format(which_view+1)]
+                self.available_rts.append((R_matrix,T_vec))
+        except Exception as e:
+            print(e)
+            print("Calib_Results.mat doesn't exist, so leave it blank")
+            print("wanted:",self.config_dir+"Calib_Results.mat")
+
+class Setup_Config_Structured_Lightstage(Setup_Config_Structured):
+    '''
+    Caution this is a continuous structured lightstage!
+    '''
+    def __init__(self, args):
+        super().__init__(args)
+
+        self.full_img_size = np.array((64*3,64*4),np.int32)
+
+        extrinsic_file = cv2.FileStorage(self.config_dir+"extrinsic0.yml", cv2.FILE_STORAGE_READ)
+        rvec = np.asarray(extrinsic_file.getNode("rvec").mat())
+        self.T_vec = np.asarray(extrinsic_file.getNode("tvec").mat()).reshape((3,1)).astype(np.float32)
+        self.R_matrix = np.asarray(cv2.Rodrigues(rvec)[0]).reshape(3,3).astype(np.float32)#(n,3)
+        tmp_cam_pos = -np.matmul(self.R_matrix.T,self.T_vec)
+        assert np.allclose(self.cam_pos.reshape(-1),tmp_cam_pos.reshape(-1)),"something is wrong: self.cam_pos:{} tmp_cam_pos:{}".format(self.cam_pos.reshape(-1),tmp_cam_pos.reshape(-1))
+        self.cam_pos_structured = tmp_cam_pos.reshape((1,3))#(3,1)
+
+    def get_rts(self,rotate_theta,device):
+        '''
+        rotate_angles = (batchsize,1) rotation theta
+        return :
+            rotated_R_matrix:(batch,3,3)
+            rotated_T_vec:(batch,3,1)
+        '''
+        batch_size = rotate_theta.shape[0]
+        view_mat_model = rotation_axis(rotate_theta,self.get_rot_axis_torch(device))#[batch,4,4]
+        view_mat_model_t = torch.transpose(view_mat_model,1,2)#[batch,4,4]
+
+        view_mat_for_normal =torch.transpose(torch.inverse(view_mat_model),1,2)#[batch,4,4]
+        view_mat_for_normal_t = torch.transpose(view_mat_for_normal,1,2)#[batch,4,4]
+
+        tmp_R_matrix = torch.from_numpy(self.R_matrix).to(device)
+        n = tmp_R_matrix[[0]].repeat(batch_size,1)#(batchsize,3)
+        t = tmp_R_matrix[[1]].repeat(batch_size,1)#(batchsize,3)
+        b = tmp_R_matrix[[2]].repeat(batch_size,1)#(batchsize,3)
+
+        #rotate frame
+        static_tmp_ones = torch.ones(batch_size,1,dtype=torch.float32,device=device)
+        pn = torch.unsqueeze(torch.cat([n,static_tmp_ones],dim=1),1)#[batch,1,4]
+        pt = torch.unsqueeze(torch.cat([t,static_tmp_ones],dim=1),1)#[batch,1,4]
+        pb = torch.unsqueeze(torch.cat([b,static_tmp_ones],dim=1),1)#[batch,1,4]
+
+        n = torch.squeeze(torch.matmul(pn,view_mat_for_normal_t),1)[:,:3]#[batch,3]
+        t = torch.squeeze(torch.matmul(pt,view_mat_for_normal_t),1)[:,:3]
+        b = torch.squeeze(torch.matmul(pb,view_mat_for_normal_t),1)[:,:3]
+
+        rotated_R_matrix = torch.stack([n,t,b],dim=1)#(batch,3axis,3)
+        
+        position = torch.from_numpy(self.cam_pos_structured).to(device).repeat(batch_size,1)
+        position = torch.unsqueeze(torch.cat([position,static_tmp_ones],dim=1),dim=1)#[batch,1,4]
+        position = torch.squeeze(torch.matmul(position,view_mat_model_t),dim=1)[:,:3]#shape=[batch,3]
+
+        rotated_T_vec = -torch.matmul(rotated_R_matrix,torch.unsqueeze(position,dim=2))#(batch,3,1)
+
+        return rotated_R_matrix,rotated_T_vec
