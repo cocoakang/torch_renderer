@@ -2,3 +2,5 @@
 wallet_of_torch_renderer/
 
 __pycache__/
+
+test_rendering/

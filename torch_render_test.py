@@ -9,12 +9,12 @@ import os
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--work_space",default="../test_rendering/")
+    parser.add_argument("--work_space",default="test_rendering/")
     args = parser.parse_args()
 
     os.makedirs(args.work_space,exist_ok=True)
 
-    device = torch.device("cuda:0")
+    device = torch.device("cpu:0")
 
     standard_rendering_parameters = {}
     standard_rendering_parameters["config_dir"] = "wallet_of_torch_renderer/blackbox20_render_configs_1x1/"
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     ####################################
     ### load test data               ###
     ####################################
-    data = np.fromfile("wallet_of_torch_renderer/render_test_params.bin",np.float32).reshape([-1,11])
+    data = np.fromfile("wallet_of_torch_renderer/render_test_params.bin",np.float32).reshape([-1,11])[:10]
     test_params = data[:,3:-1]#np.fromfile(args.work_space+"test_params.bin",np.float32).reshape([-1,11])
     test_positions = data[:,:3]#np.fromfile(args.work_space+"test_positions.bin",np.float32).reshape([-1,3])
     test_rottheta = data[:,[-1]]#np.fromfile(args.work_space+"test_rottheta.bin",np.float32).reshape([-1,1])

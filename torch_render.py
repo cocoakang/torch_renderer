@@ -530,6 +530,26 @@ def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_n
 
     return rendered_results,end_points
 
+def get_visibility_mask(setup,position):
+    '''
+    setup is Setup_Config class
+    position = (rendering positions) shape = (batch_size, 3)
+    '''
+    ### preparation
+    end_points = {}
+    device = position.device
+    batch_size = position.shape[0]
+
+    ### setup
+    light_poses = setup.get_light_poses_torch(device)#(lightnum,3)
+    light_poses = torch.unsqueeze(light_poses,dim=0)#(1,lightnum,3)
+    position = torch.unsqueeze(position,dim=1)#(batch_size,1,3)
+
+    input_dir_inv = torch.nn.functional.normalize(light_poses - position,dim=2)#(batch_size,lightnum,3)
+    
+
+
+
 def visualize_lumi(lumi,setup_config,is_batch_lumi=True,resize=True):
     '''
     if is_batch_lumi:
@@ -690,6 +710,7 @@ class Setup_Config(object):
         with open(self.config_dir+"visualize_config_torch.bin","rb") as pf:
             self.img_size = np.fromfile(pf,np.int32,2)
             self.visualize_map = np.fromfile(pf,np.int32).reshape([-1,2])
+            self.full_img_size = np.array((64*3,64*4),np.int32)
         
         try:
             self.color_tensor = np.fromfile(config_file_dir+"color_tensor_cube_LBC.bin",np.float32).reshape([3,3,3])
