@@ -530,23 +530,22 @@ def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_n
 
     return rendered_results,end_points
 
-def get_visibility_mask(setup,position):
+def get_mask_state_wrt_light(setup,position,mask_state):
     '''
-    setup is Setup_Config class
+    setup is Setup_Config_Lightfield class
     position = (rendering positions) shape = (batch_size, 3)
+    mask_state = (state of mask) shape = (masknum,) anytype, we just gather it
     '''
     ### preparation
     end_points = {}
     device = position.device
     batch_size = position.shape[0]
 
-    ### setup
-    light_poses = setup.get_light_poses_torch(device)#(lightnum,3)
-    light_poses = torch.unsqueeze(light_poses,dim=0)#(1,lightnum,3)
-    position = torch.unsqueeze(position,dim=1)#(batch_size,1,3)
+    related_mask_idxes = setup.get_related_mask(position)#(batch_size,lightnum) torch.int64
 
-    input_dir_inv = torch.nn.functional.normalize(light_poses - position,dim=2)#(batch_size,lightnum,3)
-    
+    fetched_mask_states = mask_state[related_mask_idxes]
+
+    return fetched_mask_states,end_points
 
 
 
@@ -885,3 +884,45 @@ class Setup_Config_Structured_Lightstage(Setup_Config_Structured):
         rotated_T_vec = -torch.matmul(rotated_R_matrix,torch.unsqueeze(position,dim=2))#(batch,3,1)
 
         return rotated_R_matrix,rotated_T_vec
+
+class Setup_Config_Lightfield(Setup_Config):
+    '''
+    '''
+    def __init__(self, args):
+        super().__init__(args)
+
+        self.mask_poses = self.light_poses.copy()#TODO fix this
+
+    def get_mask_poses_torch(self, custom_device):
+        return torch.from_numpy(self.mask_poses).to(custom_device)
+
+    def get_related_mask(self,position):
+        '''
+        position = (batch_size,3)
+        input_dir_inv
+
+        return = (batch_size,lightnum) torch.int64 index of mask
+        '''
+        ### preparation
+        end_points = {}
+        device = position.device
+        batch_size = position.shape[0]
+
+        ### get input_dir_inv
+        light_poses = self.get_light_poses_torch(device)#(lightnum,3)
+        light_poses = torch.unsqueeze(light_poses,dim=0)#(1,lightnum,3)
+        position = torch.unsqueeze(position,dim=1)#(batch_size,1,3)
+
+        input_dir_inv = torch.nn.functional.normalize(light_poses - position,dim=2)#(batch_size,lightnum,3)
+        
+        ### get mask_dir_inv
+        mask_poses = self.get_mask_poses_torch(device)#(masknum,3)
+        mask_poses = torch.unsqueeze(mask_poses,dim=0)#(1,masknum,3)
+        mask_dir_inv = torch.nn.functional.normalize(mask_poses - position,dim=2)#(batch_size,masknum,3)
+
+        ### find the nearest mask
+        theta = torch.sum(torch.unsqueeze(input_dir_inv,dim=2) * torch.unsqueeze(mask_dir_inv,dim=1),dim=3)#(batch_size,lightnum,masknum)
+        
+        idxes = torch.argmax(theta,dim=2)
+        
+        return idxes

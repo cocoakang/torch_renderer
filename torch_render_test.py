@@ -2,7 +2,7 @@ import numpy as np
 import math
 import torch
 import cv2
-from torch_render import Setup_Config
+from torch_render import Setup_Config_Lightfield
 import torch_render
 import argparse
 import os
@@ -17,11 +17,11 @@ if __name__ == "__main__":
     device = torch.device("cpu:0")
 
     standard_rendering_parameters = {}
-    standard_rendering_parameters["config_dir"] = "wallet_of_torch_renderer/blackbox20_render_configs_1x1/"
+    standard_rendering_parameters["config_dir"] = "wallet_of_torch_renderer/blackbox20_render_configs_8x8/"
     standard_rendering_parameters["device"] = device
 
 
-    setup = Setup_Config(standard_rendering_parameters)
+    setup = Setup_Config_Lightfield(standard_rendering_parameters)
     cam_pos_list_torch = [setup.get_cam_pos_torch(device)]
 
     ####################################
@@ -67,6 +67,11 @@ if __name__ == "__main__":
     used_rottheta = rotate_theta_zero
     # used_rottheta = input_rotatetheta
     ground_truth_lumitexels_direct,_ = torch_render.draw_rendering_net(setup,input_params,input_positions,used_rottheta,"ground_truth_renderer_direct")#[batch,lightnum,1]
+
+    mask_state = torch.ones(setup.get_light_num())
+
+    visibility_mask,_ = torch_render.get_mask_state_wrt_light(setup,input_positions,mask_state)
+
     test_node = ground_truth_lumitexels_direct
     test_node = test_node*5e5
     result = test_node.cpu().numpy()
@@ -75,3 +80,5 @@ if __name__ == "__main__":
 
     for idx,a_img in enumerate(imgs):
         cv2.imwrite(args.work_space+"{}.png".format(idx),a_img)
+    
+    print("at the end")
