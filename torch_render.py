@@ -547,8 +547,6 @@ def get_mask_state_wrt_light(setup,position,mask_state):
 
     return fetched_mask_states,end_points
 
-
-
 def visualize_lumi(lumi,setup_config,is_batch_lumi=True,resize=True):
     '''
     if is_batch_lumi:
@@ -578,6 +576,39 @@ def visualize_lumi(lumi,setup_config,is_batch_lumi=True,resize=True):
         tmp_img = np.reshape(tmp_img,[tmp_img.shape[0],setup_config.full_img_size[0],setup_config.full_img_size[1],tmp_img.shape[5]])
 
     if not is_batch_lumi:
+        tmp_img = np.squeeze(tmp_img,axis=0)
+
+    return tmp_img
+
+def visualize_mask(mask_state,setup_config,is_batch_mask=True,resize=True):
+    '''
+    if is_batch_lumi:
+        lumi=(batch,lumilen,channel_num) or (batch,lumilen)
+        return=(batch,img_height,img_width,3)
+    else:
+        lumi=(lumilen,channel_num) or (lumilen)
+        return=(img_height,img_width,3)
+    '''
+    if (is_batch_mask and len(mask_state.shape) == 2) or ((not is_batch_mask) and len(mask_state.shape) == 1):
+        mask_state = np.expand_dims(mask_state,axis=-1)
+
+    tmp_img = np.repeat(np.expand_dims(np.zeros(setup_config.img_size_mask,mask_state.dtype),axis=-1),mask_state.shape[-1],axis=-1)
+    if is_batch_mask:
+        tmp_img = np.repeat(np.expand_dims(tmp_img,axis=0),mask_state.shape[0],axis=0)
+        tmp_img[:,setup_config.visualize_map_mask[:,1],setup_config.visualize_map_mask[:,0]] = mask_state
+    else:
+        tmp_img[setup_config.visualize_map_mask[:,1],setup_config.visualize_map_mask[:,0]] = mask_state
+        tmp_img = np.expand_dims(tmp_img,axis=0)
+    #size=(img_num,originheight,originwidth,3) at this moment
+    if tmp_img.shape[3] == 1:
+        tmp_img = np.repeat(tmp_img,3,axis=3)
+    if resize:
+        ratio = setup_config.full_img_size_mask[0] //setup_config.img_size_mask[0]
+        tmp_img = np.expand_dims(np.expand_dims(tmp_img,axis=3),axis=2)#size=(img_num,originheight,1,originwidth,1,channel) at this moment
+        tmp_img = np.repeat(np.repeat(tmp_img,ratio,axis=2),ratio,axis=4)
+        tmp_img = np.reshape(tmp_img,[tmp_img.shape[0],setup_config.full_img_size_mask[0],setup_config.full_img_size_mask[1],tmp_img.shape[5]])
+
+    if not is_batch_mask:
         tmp_img = np.squeeze(tmp_img,axis=0)
 
     return tmp_img
@@ -892,9 +923,24 @@ class Setup_Config_Lightfield(Setup_Config):
         super().__init__(args)
 
         self.mask_poses = self.light_poses.copy()#TODO fix this
+        self.full_img_size = self.img_size*3
+
+        self.load_mask_data()
+
+    def load_mask_data(self):
+        tmp_data = np.fromfile(self.config_dir+"masks.bin",np.float32).reshape([1,-1,3])
+        self.mask_poses = tmp_data[0]
+
+        with open(self.config_dir+"visualize_config_mask.bin","rb") as pf:
+            self.img_size_mask = np.fromfile(pf,np.int32,2)
+            self.visualize_map_mask = np.fromfile(pf,np.int32).reshape([-1,2])
+            self.full_img_size_mask = self.img_size_mask*6
 
     def get_mask_poses_torch(self, custom_device):
         return torch.from_numpy(self.mask_poses).to(custom_device)
+
+    def get_mask_num(self):
+        return self.mask_poses.shape[0]
 
     def get_related_mask(self,position):
         '''

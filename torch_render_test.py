@@ -17,7 +17,7 @@ if __name__ == "__main__":
     device = torch.device("cpu:0")
 
     standard_rendering_parameters = {}
-    standard_rendering_parameters["config_dir"] = "wallet_of_torch_renderer/blackbox20_render_configs_8x8/"
+    standard_rendering_parameters["config_dir"] = "wallet_of_torch_renderer/light_field/"
     standard_rendering_parameters["device"] = device
 
 
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     ####################################
     ### load test data               ###
     ####################################
-    data = np.fromfile("wallet_of_torch_renderer/render_test_params.bin",np.float32).reshape([-1,11])[:10]
+    data = np.fromfile("wallet_of_torch_renderer/render_test_params.bin",np.float32).reshape([-1,11])[:50]
     test_params = data[:,3:-1]#np.fromfile(args.work_space+"test_params.bin",np.float32).reshape([-1,11])
     test_positions = data[:,:3]#np.fromfile(args.work_space+"test_positions.bin",np.float32).reshape([-1,3])
     test_rottheta = data[:,[-1]]#np.fromfile(args.work_space+"test_rottheta.bin",np.float32).reshape([-1,1])
@@ -44,31 +44,15 @@ if __name__ == "__main__":
     input_params = torch.from_numpy(tmp_params).to(device)
     input_positions = torch.from_numpy(tmp_positions).to(device)
     input_rotatetheta = torch.from_numpy(tmp_rottheta).to(device)
-    n_2d,theta,axay,pd3,ps3 = torch.split(input_params,[2,1,2,1,1],dim=1)
-    n_local = torch_render.back_hemi_octa_map(n_2d)
-    t_local,_ = torch_render.build_frame_f_z(n_local,theta,with_theta=True)
 
-    view_dir = cam_pos_list_torch[0] - input_positions #shape=[batch,3]
-    view_dir = torch.nn.functional.normalize(view_dir,dim=1)#shape=[batch,3]
-    
-    #build local frame
-    frame_t,frame_b = torch_render.build_frame_f_z(view_dir,None,with_theta=False)#[batch,3]
-    frame_n = view_dir
-
-    n_local_x,n_local_y,n_local_z = torch.split(n_local,[1,1,1],dim=1)#[batch,1],[batch,1],[batch,1]
-
-    normal = n_local_x*frame_t+n_local_y*frame_b+n_local_z*frame_n#[batch,3]
-    t_local_x,t_local_y,t_local_z = torch.split(t_local,[1,1,1],dim=1)#[batch,1],[batch,1],[batch,1]
-    tangent = t_local_x*frame_t+t_local_y*frame_b+t_local_z*frame_n#[batch,3]
-    binormal = torch.cross(normal,tangent)#[batch,3]
-
-    global_frame = [normal,tangent,binormal]
-    
     used_rottheta = rotate_theta_zero
     # used_rottheta = input_rotatetheta
     ground_truth_lumitexels_direct,_ = torch_render.draw_rendering_net(setup,input_params,input_positions,used_rottheta,"ground_truth_renderer_direct")#[batch,lightnum,1]
 
-    mask_state = torch.ones(setup.get_light_num())
+    mask_state = torch.ones(setup.get_mask_num())
+    mask_state[:120] = 0.6
+    mask_state[:32] = 0.1
+    mask_state[:13] = 0.0
 
     visibility_mask,_ = torch_render.get_mask_state_wrt_light(setup,input_positions,mask_state)
 
@@ -77,8 +61,10 @@ if __name__ == "__main__":
     result = test_node.cpu().numpy()
     
     imgs = torch_render.visualize_lumi(result,setup)
+    imgs_visinility_mask = torch_render.visualize_lumi(visibility_mask,setup)
 
     for idx,a_img in enumerate(imgs):
         cv2.imwrite(args.work_space+"{}.png".format(idx),a_img)
+        cv2.imwrite(args.work_space+"{}_mask.png".format(idx),imgs_visinility_mask[idx]*255.0)
     
     print("at the end")
