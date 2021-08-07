@@ -924,6 +924,13 @@ class Setup_Config_Lightfield(Setup_Config):
 
         self.mask_poses = self.light_poses.copy()#TODO fix this
         self.full_img_size = self.img_size*3
+        
+        extrinsic_file = cv2.FileStorage(self.config_dir+"extrinsic0.yml", cv2.FILE_STORAGE_READ)
+        self.R_matrix = np.asarray(extrinsic_file.getNode("r_matrix").mat()).reshape((3,3)).astype(np.float32)
+        self.T_vec = np.asarray(extrinsic_file.getNode("t_vector").mat()).reshape((3,1)).astype(np.float32)
+        tmp_cam_pos = -np.matmul(self.R_matrix.T,self.T_vec)
+        assert np.allclose(self.cam_pos.reshape(-1),tmp_cam_pos.reshape(-1)),"something is wrong: self.cam_pos:{} tmp_cam_pos:{}".format(self.cam_pos.reshape(-1),tmp_cam_pos.reshape(-1))
+        self.cam_pos_structured = tmp_cam_pos.reshape((1,3))#(3,1)
 
         self.load_mask_data()
 
@@ -942,7 +949,7 @@ class Setup_Config_Lightfield(Setup_Config):
     def get_mask_num(self):
         return self.mask_poses.shape[0]
 
-    def get_related_mask(self,position):
+    def get_related_mask(self,position,use_rotate_theta = False,rotate_theta = None):
         '''
         position = (batch_size,3)
         input_dir_inv
@@ -953,6 +960,9 @@ class Setup_Config_Lightfield(Setup_Config):
         end_points = {}
         device = position.device
         batch_size = position.shape[0]
+
+        if use_rotate_theta:
+            position = rotate_point_along_axis(self,rotate_theta,position)
 
         ### get input_dir_inv
         light_poses = self.get_light_poses_torch(device)#(lightnum,3)
@@ -972,3 +982,42 @@ class Setup_Config_Lightfield(Setup_Config):
         idxes = torch.argmax(theta,dim=2)
         
         return idxes
+    
+    def get_rts(self,rotate_theta,device):
+        '''
+        rotate_angles = (batchsize,1) rotation theta
+        return :
+            rotated_R_matrix:(batch,3,3)
+            rotated_T_vec:(batch,3,1)
+        '''
+        batch_size = rotate_theta.shape[0]
+        view_mat_model = rotation_axis(rotate_theta,self.get_rot_axis_torch(device))#[batch,4,4]
+        view_mat_model_t = torch.transpose(view_mat_model,1,2)#[batch,4,4]
+
+        view_mat_for_normal =torch.transpose(torch.inverse(view_mat_model),1,2)#[batch,4,4]
+        view_mat_for_normal_t = torch.transpose(view_mat_for_normal,1,2)#[batch,4,4]
+
+        tmp_R_matrix = torch.from_numpy(self.R_matrix).to(device)
+        n = tmp_R_matrix[[0]].repeat(batch_size,1)#(batchsize,3)
+        t = tmp_R_matrix[[1]].repeat(batch_size,1)#(batchsize,3)
+        b = tmp_R_matrix[[2]].repeat(batch_size,1)#(batchsize,3)
+
+        #rotate frame
+        static_tmp_ones = torch.ones(batch_size,1,dtype=torch.float32,device=device)
+        pn = torch.unsqueeze(torch.cat([n,static_tmp_ones],dim=1),1)#[batch,1,4]
+        pt = torch.unsqueeze(torch.cat([t,static_tmp_ones],dim=1),1)#[batch,1,4]
+        pb = torch.unsqueeze(torch.cat([b,static_tmp_ones],dim=1),1)#[batch,1,4]
+
+        n = torch.squeeze(torch.matmul(pn,view_mat_for_normal_t),1)[:,:3]#[batch,3]
+        t = torch.squeeze(torch.matmul(pt,view_mat_for_normal_t),1)[:,:3]
+        b = torch.squeeze(torch.matmul(pb,view_mat_for_normal_t),1)[:,:3]
+
+        rotated_R_matrix = torch.stack([n,t,b],dim=1)#(batch,3axis,3)
+        
+        position = torch.from_numpy(self.cam_pos_structured).to(device).repeat(batch_size,1)
+        position = torch.unsqueeze(torch.cat([position,static_tmp_ones],dim=1),dim=1)#[batch,1,4]
+        position = torch.squeeze(torch.matmul(position,view_mat_model_t),dim=1)[:,:3]#shape=[batch,3]
+
+        rotated_T_vec = -torch.matmul(rotated_R_matrix,torch.unsqueeze(position,dim=2))#(batch,3,1)
+
+        return rotated_R_matrix,rotated_T_vec

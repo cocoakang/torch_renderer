@@ -114,6 +114,17 @@ if __name__ == "__main__":
     pcd.normals = o3d.utility.Vector3dVector(normal_collector)
     o3d.io.write_point_cloud(args.save_root+"setup.ply", pcd)
 
+    x_axis = np.array((0.0,1.0,0.0),np.float32)
+    z_axis = cam_pos / np.linalg.norm(cam_pos)
+    y_axis = np.cross(z_axis,x_axis)
+
+    R_matrix = np.stack((x_axis,y_axis,z_axis),axis=0)
+    T_vec = -np.matmul(R_matrix,cam_pos.reshape((3,1)))
+
+    fs = cv2.FileStorage(args.save_root+"extrinsic0.yml",cv2.FILE_STORAGE_WRITE)
+    fs.write("r_matrix", R_matrix)
+    fs.write("t_vector",T_vec)
+    fs.release()
     ######################################################################
     ###test here
     ######################################################################
