@@ -691,6 +691,9 @@ class Setup_Config(object):
             self.img_size = np.fromfile(pf,np.int32,2)
             self.visualize_map = np.fromfile(pf,np.int32).reshape([-1,2])
         
+        print("[CAUTION]You are using base Setup_Config class, this is default for light stage!")
+        self.full_img_size = np.array((64*3,64*4),np.int32)
+
         try:
             self.color_tensor = np.fromfile(config_file_dir+"color_tensor_cube_LBC.bin",np.float32).reshape([3,3,3])
         except FileNotFoundError  as identifier:
@@ -816,6 +819,8 @@ class Setup_Config_Structured_Lightstage(Setup_Config_Structured):
     def __init__(self, args):
         super().__init__(args)
 
+        self.cam_pos_gmyframe = self.cam_pos.copy()
+
         self.full_img_size = np.array((64*3,64*4),np.int32)
 
         extrinsic_file = cv2.FileStorage(self.config_dir+"extrinsic0.yml", cv2.FILE_STORAGE_READ)
@@ -825,6 +830,31 @@ class Setup_Config_Structured_Lightstage(Setup_Config_Structured):
         tmp_cam_pos = -np.matmul(self.R_matrix.T,self.T_vec)
         assert np.allclose(self.cam_pos.reshape(-1),tmp_cam_pos.reshape(-1)),"something is wrong: self.cam_pos:{} tmp_cam_pos:{}".format(self.cam_pos.reshape(-1),tmp_cam_pos.reshape(-1))
         self.cam_pos_structured = tmp_cam_pos.reshape((1,3))#(3,1)
+
+        self.is_cs_mode = False
+
+    def to_cs(self):
+        if self.is_cs_mode:
+            return
+        self.cam_pos = np.matmul(self.R_matrix,self.cam_pos.reshape((3,1)))+self.T_vec
+        self.cam_pos = self.cam_pos.reshape((-1))
+        print("new cam pos:{}".format(self.cam_pos))
+
+        self.light_poses = np.matmul(self.R_matrix,self.light_poses.T)+self.T_vec
+        self.light_poses = self.light_poses.T
+
+        self.light_normals = np.matmul(self.R_matrix,self.light_normals.T)
+        self.light_normals = self.light_normals.T
+
+        self.is_cs_mode = True
+
+    def to_gs(self):
+        if not self.is_cs_mode:
+            print("It is already in gmy space")
+            return
+        print("incompleted!")
+        exit()
+
 
     def get_rts(self,rotate_theta,device):
         '''
