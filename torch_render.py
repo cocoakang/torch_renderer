@@ -530,7 +530,7 @@ def draw_rendering_net(setup,input_params,position,rotate_theta,variable_scope_n
 
     return rendered_results,end_points
 
-def visualize_lumi(lumi,setup_config,is_batch_lumi=True,resize=True):
+def visualize_lumi(lumi,setup_config,is_batch_lumi=True,resize=False):
     '''
     if is_batch_lumi:
         lumi=(batch,lumilen,channel_num) or (batch,lumilen)
